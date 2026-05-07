@@ -50,6 +50,7 @@ export default async function ProductsPage() {
                   </Link>
                 </CardTitle>
                 <CardSubtitle>
+                  {p.masterSku ? <span className="mr-2 font-mono text-xs">{p.masterSku}</span> : null}
                   {p.category ?? "Ohne Kategorie"} · angelegt am {formatDateShort(p.createdAt)}
                 </CardSubtitle>
               </CardHeader>

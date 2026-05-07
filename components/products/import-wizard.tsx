@@ -9,6 +9,7 @@ import { Card, CardBody, CardHeader, CardSubtitle, CardTitle } from "@/component
 import { Badge } from "@/components/ui/badge";
 
 type Mapping = Partial<Record<
+  | "masterSku"
   | "name"
   | "description"
   | "productUrl"
@@ -18,7 +19,11 @@ type Mapping = Partial<Record<
   | "keywords"
   | "exclusions"
   | "priceRangeMin"
-  | "priceRangeMax",
+  | "priceRangeMax"
+  | "variantLabel"
+  | "variantSku"
+  | "variantPackSize"
+  | "variantPrice",
   string
 >>;
 
@@ -37,18 +42,22 @@ type ImportItemResult = {
   rowIndex: number;
   productId?: string;
   name?: string;
+  masterSku?: string;
+  variantsAdded?: number;
   enrichment?: { ok: boolean; error?: string; status?: number };
   error?: string;
 };
 
 type ImportRunResult = {
   created: number;
+  updated: number;
   skipped: number;
   failed: number;
   items: ImportItemResult[];
 };
 
 const FIELD_LABELS: Array<[keyof Mapping, string, string?]> = [
+  ["masterSku", "Master-SKU", "konsolidiert Varianten"],
   ["name", "Produktname", "Pflicht"],
   ["description", "Beschreibung"],
   ["productUrl", "Produkt-URL"],
@@ -59,6 +68,10 @@ const FIELD_LABELS: Array<[keyof Mapping, string, string?]> = [
   ["exclusions", "Ausschlüsse"],
   ["priceRangeMin", "Preis min"],
   ["priceRangeMax", "Preis max"],
+  ["variantLabel", "Variant-Label", "z. B. 1er/3er"],
+  ["variantSku", "Variant-SKU/ASIN"],
+  ["variantPackSize", "Pack-Größe"],
+  ["variantPrice", "Variant-Preis"],
 ];
 
 export function ImportWizard() {
@@ -353,7 +366,7 @@ export function ImportWizard() {
           <CardHeader>
             <CardTitle>Import-Ergebnis</CardTitle>
             <CardSubtitle>
-              {result.created} angelegt · {result.skipped} übersprungen · {result.failed} fehlerhaft
+              {result.created} neu angelegt · {result.updated} aktualisiert · {result.skipped} übersprungen · {result.failed} fehlerhaft
             </CardSubtitle>
           </CardHeader>
           <CardBody className="space-y-3">
@@ -363,6 +376,8 @@ export function ImportWizard() {
                   <tr>
                     <th className="px-2 py-2">#</th>
                     <th className="px-2 py-2">Produkt</th>
+                    <th className="px-2 py-2">Master-SKU</th>
+                    <th className="px-2 py-2">Varianten</th>
                     <th className="px-2 py-2">Status</th>
                     <th className="px-2 py-2">Anreicherung</th>
                   </tr>
@@ -380,11 +395,13 @@ export function ImportWizard() {
                           <span className="text-slate-700">{it.name ?? "—"}</span>
                         )}
                       </td>
+                      <td className="px-2 py-1.5 text-slate-500">{it.masterSku ?? "—"}</td>
+                      <td className="px-2 py-1.5 text-slate-500 tabular-nums">{it.variantsAdded ?? 0}</td>
                       <td className="px-2 py-1.5">
                         {it.error ? (
                           <Badge variant="danger">{it.error}</Badge>
                         ) : it.productId ? (
-                          <Badge variant="success">angelegt</Badge>
+                          <Badge variant="success">{it.variantsAdded && it.variantsAdded > 0 ? "konsolidiert" : "angelegt"}</Badge>
                         ) : (
                           <Badge variant="muted">übersprungen</Badge>
                         )}

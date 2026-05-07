@@ -38,6 +38,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           </Link>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">{product.name}</h1>
           <p className="text-sm text-slate-500">
+            {product.masterSku ? <span className="mr-2 font-mono text-xs text-slate-700">{product.masterSku}</span> : null}
             {product.category ?? "Ohne Kategorie"} · {product.targetRegion ?? "Region offen"} · angelegt am{" "}
             {formatDateShort(product.createdAt)}
           </p>
@@ -83,6 +84,9 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               ) : null}
             </CardBody>
           </Card>
+
+          <ProductVariantsCard variants={product.variants as unknown as Array<Record<string, unknown>> | null} />
+
 
           <Card>
             <CardHeader>
@@ -203,5 +207,62 @@ function ListSection({ title, items }: { title: string; items: string[] }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+type VariantRow = {
+  label?: string;
+  sku?: string;
+  packSize?: number;
+  price?: number;
+  url?: string;
+};
+
+function ProductVariantsCard({ variants }: { variants: Array<Record<string, unknown>> | null }) {
+  if (!variants || !Array.isArray(variants) || variants.length === 0) return null;
+  const rows = variants as VariantRow[];
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Varianten ({rows.length})</CardTitle>
+        <CardSubtitle>Pack-Größen / SKUs, die unter dieser Master-SKU zusammengefasst sind.</CardSubtitle>
+      </CardHeader>
+      <CardBody>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="py-2 pr-4">Label</th>
+                <th className="py-2 pr-4">SKU / ASIN</th>
+                <th className="py-2 pr-4">Pack-Größe</th>
+                <th className="py-2 pr-4 text-right">Preis</th>
+                <th className="py-2 pr-4">Link</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((v, i) => (
+                <tr key={`${v.sku ?? ""}-${i}`}>
+                  <td className="py-2 pr-4 font-medium text-slate-900">{v.label ?? "—"}</td>
+                  <td className="py-2 pr-4 font-mono text-xs text-slate-700">{v.sku ?? "—"}</td>
+                  <td className="py-2 pr-4 tabular-nums text-slate-600">{v.packSize ?? "—"}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums text-slate-600">
+                    {typeof v.price === "number" ? v.price.toFixed(2) : "—"}
+                  </td>
+                  <td className="py-2 pr-4 text-slate-600">
+                    {v.url ? (
+                      <a className="underline" href={v.url} target="_blank" rel="noreferrer">
+                        öffnen
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardBody>
+    </Card>
   );
 }
