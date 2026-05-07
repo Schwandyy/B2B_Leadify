@@ -17,6 +17,8 @@ export type ParseOptions = {
   headerRow?: number;
   /** Override the gid for Google Sheets. */
   gid?: string;
+  /** Tab-Name (z. B. "Master") — überschreibt gid, da stabiler als gid in URLs. */
+  sheetName?: string;
 };
 
 /**
@@ -67,20 +69,38 @@ export async function parseGoogleSheet(url: string, options: ParseOptions = {}):
       "Konnte die Google-Sheets-URL nicht lesen. Bitte die normale Tabellen-URL einfügen (https://docs.google.com/spreadsheets/d/...).",
     );
   }
+  const sheetName = options.sheetName?.trim();
   const gid = options.gid?.trim() || ids.gid;
 
-  const attempts = [
-    `https://docs.google.com/spreadsheets/d/${ids.spreadsheetId}/export?format=csv&gid=${gid}`,
-    `https://docs.google.com/spreadsheets/d/${ids.spreadsheetId}/gviz/tq?tqx=out:csv&gid=${gid}`,
-  ];
+  // Tab-Name hat Priorität: er ist stabil über URL-Wechsel hinweg.
+  // Google's gviz-Endpoint akzeptiert &sheet={Name}.
+  const attempts: Array<{ url: string; label: string }> = [];
+  if (sheetName) {
+    attempts.push({
+      url: `https://docs.google.com/spreadsheets/d/${ids.spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`,
+      label: `Tab "${sheetName}"`,
+    });
+  }
+  attempts.push(
+    {
+      url: `https://docs.google.com/spreadsheets/d/${ids.spreadsheetId}/export?format=csv&gid=${gid}`,
+      label: `gid ${gid}`,
+    },
+    {
+      url: `https://docs.google.com/spreadsheets/d/${ids.spreadsheetId}/gviz/tq?tqx=out:csv&gid=${gid}`,
+      label: `gid ${gid} (gviz)`,
+    },
+  );
 
   let lastError = "";
-  for (const endpoint of attempts) {
-    const csv = await tryFetchCsv(endpoint);
+  for (const attempt of attempts) {
+    const csv = await tryFetchCsv(attempt.url);
     if (csv.kind === "ok") {
       const workbook = XLSX.read(csv.body, { type: "string" });
       const result = workbookToResult(workbook, "google-sheets", options);
-      result.warnings.unshift(`Geladen: gid=${gid} · ${csv.body.split(/\r?\n/).length} Roh-Zeilen aus Google.`);
+      result.warnings.unshift(
+        `Geladen: ${attempt.label} · ${csv.body.split(/\r?\n/).length} Roh-Zeilen aus Google.`,
+      );
       return result;
     }
     lastError = csv.error;
@@ -166,7 +186,13 @@ function workbookToResult(
     warnings.push(`Header automatisch in Zeile ${headerRowIndex + 1} erkannt.`);
   }
 
-  const rawHeaders = (matrix[headerRowIndex] ?? []).map((v, i) => stringValue(v) || `Spalte ${i + 1}`);
+  // Leere Header-Zellen bekommen einen Excel-Buchstaben-Fallback ("Spalte A",
+  // "Spalte R", ...) — so kann der User in seiner Beschreibung wörtlich
+  // "Spalte R" sagen, auch wenn die echte Sheet dort einen merged-Cell-Header
+  // ohne Text in dieser Position hat.
+  const rawHeaders = (matrix[headerRowIndex] ?? []).map(
+    (v, i) => stringValue(v) || `Spalte ${columnIndexToExcelLetter(i)}`,
+  );
   const headers = ensureUniqueHeaders(rawHeaders);
 
   const dataRows = matrix.slice(headerRowIndex + 1);
@@ -183,27 +209,47 @@ function workbookToResult(
 }
 
 function autoDetectHeaderRow(matrix: unknown[][]): number {
-  // Take a look at the first 5 rows and pick the first one that looks
-  // like real headers (mostly non-empty, mostly short text).
-  const limit = Math.min(5, matrix.length);
+  // Bewertet die ersten 8 Zeilen und sucht die mit dem höchsten Anteil an
+  // kurzen Textzellen (Header-Stichworte). Numerisch dominante Zeilen werden
+  // bestraft, damit eine erste Daten-Zeile (AZ001, $0.95, 835, ...) nicht
+  // als Header-Zeile gewählt wird.
+  const limit = Math.min(8, matrix.length);
   let bestIdx = 0;
   let bestScore = -1;
   for (let i = 0; i < limit; i++) {
     const row = matrix[i] ?? [];
     let nonEmpty = 0;
     let textLike = 0;
+    let numericLike = 0;
     for (const cell of row) {
       const s = stringValue(cell);
-      if (s) nonEmpty += 1;
-      if (s && s.length <= 60 && /[A-Za-zÄÖÜäöüß]/.test(s)) textLike += 1;
+      if (!s) continue;
+      nonEmpty += 1;
+      const looksNumeric = /^[\s\-+€$]?[\d.,\s]+\s?[€$%]?$/.test(s) || /^TRUE|FALSE$/i.test(s);
+      const looksText = s.length <= 60 && /[A-Za-zÄÖÜäöüß]/.test(s) && !looksNumeric;
+      if (looksText) textLike += 1;
+      else if (looksNumeric) numericLike += 1;
     }
-    const score = textLike + nonEmpty * 0.5;
-    if (score > bestScore && nonEmpty >= 2) {
+    // Header braucht min. 3 Textzellen, und Text muss klar überwiegen.
+    if (textLike < 3) continue;
+    if (numericLike >= textLike) continue;
+    const score = textLike * 2 - numericLike + nonEmpty * 0.1;
+    if (score > bestScore) {
       bestScore = score;
       bestIdx = i;
     }
   }
   return bestIdx;
+}
+
+function columnIndexToExcelLetter(index: number): string {
+  let i = index;
+  let s = "";
+  while (i >= 0) {
+    s = String.fromCharCode((i % 26) + 65) + s;
+    i = Math.floor(i / 26) - 1;
+  }
+  return s;
 }
 
 function ensureUniqueHeaders(headers: string[]): string[] {

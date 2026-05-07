@@ -404,6 +404,9 @@ model InventorySource {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sheetUrl       String
   gid            String?
+  // Tab-Name (z. B. "Master") — stabiler als gid, wird beim Sync per
+  // gviz/tq?sheet={Name} angesteuert. Aus der Beschreibung extrahiert.
+  tabName        String?
   headerRow      Int?
   // Freitext-Beschreibung dessen, was in der Sheet erwartet wird.
   // Wird vom KI-Auto-Mapping als Hint genutzt, um skuColumn/stockColumn

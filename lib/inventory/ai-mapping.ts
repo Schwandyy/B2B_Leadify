@@ -79,6 +79,24 @@ type ExplicitHints = {
 };
 
 /**
+ * Sucht in der Freitext-Beschreibung nach "Tab 'Master'", "Tab \"X\"" oder
+ * "im Tab Master". Liefert den Tab-Namen ohne Quotes zurück, oder null.
+ */
+export function extractTabName(description: string): string | null {
+  if (!description.trim()) return null;
+  const patterns = [
+    /\btab\s+['"„]([^'"„""]+)['"""]/i,
+    /\btab\s+([A-Z][A-Za-z0-9_\- ]{0,30})\b/,
+    /\bsheet\s+['"„]([^'"„""]+)['"""]/i,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(description);
+    if (m && m[1]) return m[1].trim();
+  }
+  return null;
+}
+
+/**
  * Sucht in der Freitext-Beschreibung nach "Spalte A", "Spalte R" etc. und
  * ordnet jede Erwähnung dem näher liegenden Schlüsselwort zu (SKU vs. Bestand).
  */

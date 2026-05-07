@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import { syncInventory } from "@/lib/inventory/sync";
 import { parseGoogleSheet, parseSheetIds } from "@/lib/import/parser";
-import { suggestColumnMapping } from "@/lib/inventory/ai-mapping";
+import { suggestColumnMapping, extractTabName } from "@/lib/inventory/ai-mapping";
 
 export type ConnectAndSyncInput = {
   sheetUrl: string;
@@ -48,10 +48,11 @@ export async function connectAndSync(input: ConnectAndSyncInput): Promise<Connec
     };
   }
   const description = input.description?.trim() || undefined;
+  const tabName = description ? extractTabName(description) : null;
 
   let parsed;
   try {
-    parsed = await parseGoogleSheet(url);
+    parsed = await parseGoogleSheet(url, { sheetName: tabName ?? undefined });
   } catch (err) {
     return {
       ok: false,
@@ -89,13 +90,16 @@ export async function connectAndSync(input: ConnectAndSyncInput): Promise<Connec
     };
   }
 
-  // Persistieren + sofort syncen.
+  // Persistieren + sofort syncen. Tab-Name wird mitgespeichert; beim
+  // Re-Sync wird damit zuverlässig der richtige Tab geladen — unabhängig
+  // von der gid-Stale-Falle in der ursprünglichen URL.
   await prisma.inventorySource.upsert({
     where: { organizationId: user.organizationId },
     create: {
       organizationId: user.organizationId,
       sheetUrl: url,
       gid: ids.gid,
+      tabName,
       headerRow: null,
       description: description ?? null,
       skuColumn: suggestion.skuColumn,
@@ -104,6 +108,7 @@ export async function connectAndSync(input: ConnectAndSyncInput): Promise<Connec
     update: {
       sheetUrl: url,
       gid: ids.gid,
+      tabName,
       headerRow: null,
       description: description ?? null,
       skuColumn: suggestion.skuColumn,

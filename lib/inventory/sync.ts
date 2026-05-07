@@ -32,6 +32,7 @@ export async function syncInventory(organizationId: string): Promise<SyncResult>
     parsed = await parseGoogleSheet(source.sheetUrl, {
       headerRow: source.headerRow ?? undefined,
       gid: source.gid ?? undefined,
+      sheetName: source.tabName ?? undefined,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Sheet konnte nicht gelesen werden.";
