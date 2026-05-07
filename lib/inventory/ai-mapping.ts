@@ -36,19 +36,35 @@ export async function suggestColumnMapping(args: SuggestArgs): Promise<MappingSu
     };
   }
 
+  // Schritt 1: Explizite Excel-Spaltenangaben aus der Beschreibung deuten
+  // ("AZ-Code in Spalte A", "Bestand in Spalte R"). Wenn der User es klar
+  // sagt, nehmen wir es wörtlich und brauchen keine KI mehr.
+  const explicit = extractExplicitColumns(args.description ?? "", args.headers);
+  if (explicit.skuColumn && explicit.stockColumn) {
+    return {
+      skuColumn: explicit.skuColumn,
+      stockColumn: explicit.stockColumn,
+      confidence: "high",
+      reasoning: `Übernommen aus deiner Beschreibung: ${explicit.reasoning}`,
+      warnings: [],
+      source: "heuristic",
+    };
+  }
+
   const provider = (process.env.AI_PROVIDER ?? "mock").toLowerCase();
   const hasKey =
     (provider === "openai" && Boolean(process.env.OPENAI_API_KEY)) ||
     (provider === "anthropic" && Boolean(process.env.ANTHROPIC_API_KEY));
 
   if (!hasKey) {
-    return heuristic(args);
+    return heuristic(args, explicit);
   }
 
   try {
-    return await viaAI(args);
+    const result = await viaAI(args, explicit);
+    return result;
   } catch (err) {
-    const fallback = heuristic(args);
+    const fallback = heuristic(args, explicit);
     fallback.warnings.unshift(
       `KI-Aufruf fehlgeschlagen (${err instanceof Error ? err.message : "unbekannt"}) — Heuristik genutzt.`,
     );
@@ -56,15 +72,98 @@ export async function suggestColumnMapping(args: SuggestArgs): Promise<MappingSu
   }
 }
 
-async function viaAI(args: SuggestArgs): Promise<MappingSuggestion> {
+type ExplicitHints = {
+  skuColumn: string | null;
+  stockColumn: string | null;
+  reasoning: string;
+};
+
+/**
+ * Sucht in der Freitext-Beschreibung nach "Spalte A", "Spalte R" etc. und
+ * ordnet jede Erwähnung dem näher liegenden Schlüsselwort zu (SKU vs. Bestand).
+ */
+function extractExplicitColumns(description: string, headers: string[]): ExplicitHints {
+  if (!description.trim()) return { skuColumn: null, stockColumn: null, reasoning: "" };
+
+  const skuKw = /(?:az[-\s]?code|az[-\s]?delivery|\bsku\b|artikel(?:nummer)?|master[-\s]?sku|produkt[-\s]?code)/gi;
+  const stockKw = /(?:bestand|verf(?:ü|u)gbar|lager|stock|menge|anzahl|inventory)/gi;
+  const spalteRe = /\bspalte\s+([a-z]{1,3})\b/gi;
+
+  let skuLetter: string | null = null;
+  let stockLetter: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = spalteRe.exec(description)) !== null) {
+    const letter = m[1];
+    const before = description.slice(0, m.index);
+    const lastSku = lastMatchEnd(before, skuKw);
+    const lastStock = lastMatchEnd(before, stockKw);
+    if (lastSku === -1 && lastStock === -1) continue;
+    const skuWins = lastSku !== -1 && (lastStock === -1 || lastSku > lastStock);
+    if (skuWins) {
+      if (!skuLetter) skuLetter = letter;
+    } else if (lastStock !== -1) {
+      if (!stockLetter) stockLetter = letter;
+    }
+  }
+
+  const skuIdx = skuLetter ? excelLetterToIndex(skuLetter) : null;
+  const stockIdx = stockLetter ? excelLetterToIndex(stockLetter) : null;
+
+  const skuCol = skuIdx !== null && skuIdx >= 0 && skuIdx < headers.length ? headers[skuIdx] : null;
+  const stockCol = stockIdx !== null && stockIdx >= 0 && stockIdx < headers.length ? headers[stockIdx] : null;
+
+  const parts: string[] = [];
+  if (skuCol) parts.push(`Spalte ${skuLetter?.toUpperCase()} → "${skuCol}"`);
+  if (stockCol) parts.push(`Spalte ${stockLetter?.toUpperCase()} → "${stockCol}"`);
+
+  return {
+    skuColumn: skuCol,
+    stockColumn: stockCol,
+    reasoning: parts.join(", "),
+  };
+}
+
+function lastMatchEnd(text: string, pattern: RegExp): number {
+  const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g");
+  let last = -1;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) last = m.index;
+  return last;
+}
+
+function excelLetterToIndex(letters: string): number | null {
+  if (!/^[a-zA-Z]+$/.test(letters)) return null;
+  const upper = letters.toUpperCase();
+  let idx = 0;
+  for (const ch of upper) {
+    idx = idx * 26 + (ch.charCodeAt(0) - "A".charCodeAt(0) + 1);
+  }
+  return idx - 1;
+}
+
+async function viaAI(args: SuggestArgs, explicit: ExplicitHints): Promise<MappingSuggestion> {
   const client = getAIClient();
   const sample = args.sampleRows.slice(0, 5);
+
+  const headerLetterMap = args.headers
+    .map((h, i) => `${indexToExcelLetter(i)}=${JSON.stringify(h)}`)
+    .join(", ");
+
+  const explicitNote =
+    explicit.skuColumn || explicit.stockColumn
+      ? `\nAus der Beschreibung wurde bereits explizit erkannt: ` +
+        `${explicit.skuColumn ? `AZ-Code = "${explicit.skuColumn}"` : "AZ-Code: nicht aus Beschreibung ableitbar"}; ` +
+        `${explicit.stockColumn ? `Bestand = "${explicit.stockColumn}"` : "Bestand: nicht aus Beschreibung ableitbar"}. ` +
+        `Du MUSST diese Werte übernehmen, falls sie gesetzt sind.`
+      : "";
 
   const system =
     "Du hilfst beim Mapping von Spalten einer Tabelle (z. B. Lagerbestand-Export) " +
     "auf zwei interne Felder: SKU/AZ-Code und verfügbarer Bestand (Integer). " +
     "Antworte ausschließlich mit JSON nach dem vorgegebenen Schema. " +
     "Nutze ausschließlich Werte, die exakt einem der gegebenen Header entsprechen. " +
+    "Wenn der Nutzer Excel-Spaltenbuchstaben (Spalte A, B, R, ...) nennt, " +
+    "wandle diese über die mitgelieferte Letter→Header-Tabelle um und nimm GENAU diesen Header. " +
     "Wenn keine Spalte passt, setze das Feld auf null.";
 
   const prompt = [
@@ -72,11 +171,13 @@ async function viaAI(args: SuggestArgs): Promise<MappingSuggestion> {
       ? `Beschreibung des Nutzers, was die Tabelle enthalten soll:\n${args.description}\n`
       : "Keine zusätzliche Beschreibung des Nutzers vorhanden.\n",
     `Header der geladenen Sheet (in Original-Schreibweise):\n${JSON.stringify(args.headers)}`,
+    `Excel-Spaltenbuchstaben → Header (für Beschreibungen wie "Spalte A"):\n${headerLetterMap}`,
     `Erste ${sample.length} Datenzeile(n) als Plausibilitätshilfe:\n${JSON.stringify(sample, null, 2)}`,
     "Aufgabe: Wähle den am besten passenden Header für (a) AZ-Code/SKU und " +
       "(b) verfügbarer Bestand. AZ-Codes sehen typischerweise wie 'AZ001' oder 'AZ-Delivery-1234' aus, " +
       "Bestände sind ganze Zahlen >= 0. confidence ist 'high', wenn die Beschreibung klar passt UND die " +
-      "Werte plausibel sind; 'medium' bei einer der beiden Bedingungen; 'low' sonst.",
+      "Werte plausibel sind; 'medium' bei einer der beiden Bedingungen; 'low' sonst." +
+      explicitNote,
   ].join("\n\n");
 
   const { data, model } = await client.generateJSON<{
@@ -114,7 +215,20 @@ async function viaAI(args: SuggestArgs): Promise<MappingSuggestion> {
   };
 }
 
-function heuristic({ headers, sampleRows, description }: SuggestArgs): MappingSuggestion {
+function indexToExcelLetter(index: number): string {
+  let i = index;
+  let s = "";
+  while (i >= 0) {
+    s = String.fromCharCode((i % 26) + 65) + s;
+    i = Math.floor(i / 26) - 1;
+  }
+  return s;
+}
+
+function heuristic(
+  { headers, sampleRows, description }: SuggestArgs,
+  explicit: ExplicitHints = { skuColumn: null, stockColumn: null, reasoning: "" },
+): MappingSuggestion {
   const lowerHeaders = headers.map((h) => ({ original: h, lower: h.toLowerCase() }));
 
   const skuPatterns = [
@@ -136,8 +250,9 @@ function heuristic({ headers, sampleRows, description }: SuggestArgs): MappingSu
     /\bqty\b/,
   ];
 
-  const skuMatch = matchHeader(lowerHeaders, skuPatterns);
-  const stockMatch = matchHeader(lowerHeaders, stockPatterns);
+  // Explizite Spaltenangaben aus der Beschreibung gewinnen immer.
+  const skuMatch = explicit.skuColumn ?? matchHeader(lowerHeaders, skuPatterns);
+  const stockMatch = explicit.stockColumn ?? matchHeader(lowerHeaders, stockPatterns);
 
   const warnings: string[] = [];
   if (!skuMatch) warnings.push("Keine SKU-Spalte per Heuristik erkannt — bitte manuell setzen.");
