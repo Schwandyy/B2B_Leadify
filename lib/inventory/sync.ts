@@ -119,12 +119,27 @@ function buildRecords(
   return { valid, skipped };
 }
 
+// Postgres INT4-Maximum. Werte darüber sind in einer Stock-Spalte fast
+// sicher Parse-Fehler (z. B. Geldbeträge mit aggressiv entfernten Trennern).
+const MAX_STOCK = 2_000_000_000;
+
 function parseStock(value: string): number | null {
   if (!value) return null;
-  // Tausender-Trenner und Whitespace tolerieren ("1.234", "1 234", "1,234").
-  const cleaned = value.replace(/[\s.,]/g, "");
-  if (!/^-?\d+$/.test(cleaned)) return null;
-  const n = Number(cleaned);
-  if (!Number.isFinite(n)) return null;
-  return Math.max(0, Math.trunc(n));
+  // Währungs-Symbole und Whitespace entfernen.
+  let s = value.replace(/[\s€$£¥%]/g, "").trim();
+  if (!s) return null;
+
+  // Klassische Geldbetrag-Muster (Dezimalstellen) ablehnen — kein Bestand.
+  // "270,00", "1.234,56", "1,234.56", "30.99"
+  if (/^-?\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2}$/.test(s)) return null;
+  if (/^-?\d+[.,]\d{1,2}$/.test(s)) return null;
+
+  // Tausender-Trenner mit klarem 3er-Muster auflösen ("1.234.567", "1,234,567").
+  if (/^-?\d{1,3}(?:\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");
+  else if (/^-?\d{1,3}(?:,\d{3})+$/.test(s)) s = s.replace(/,/g, "");
+
+  if (!/^-?\d+$/.test(s)) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 0 || n > MAX_STOCK) return null;
+  return Math.trunc(n);
 }
