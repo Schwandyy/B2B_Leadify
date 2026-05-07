@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty";
 import { ConsolidateProductsButton } from "@/components/products/consolidate-button";
 import { ProductsSearch } from "@/components/products/products-search";
+import { ProductsViewToggle, type ProductsView } from "@/components/products/view-toggle";
 import { formatDateShort } from "@/lib/utils/format";
 import type { Prisma } from "@prisma/client";
 
@@ -21,6 +22,7 @@ export default async function ProductsPage({
   const user = await requireUser();
   const q = (sp.q as string | undefined)?.trim();
   const page = Math.max(1, parseInt((sp.page as string | undefined) ?? "1", 10));
+  const view: ProductsView = (sp.view as string | undefined) === "grid" ? "grid" : "list";
 
   const where: Prisma.ProductWhereInput = {
     organizationId: user.organizationId,
@@ -68,7 +70,8 @@ export default async function ProductsPage({
             {q ? <span> · gefiltert: {total} Treffer</span> : null}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <ProductsViewToggle current={view} />
           {allCount > 0 ? <ConsolidateProductsButton /> : null}
           <Link href="/products/import"><Button variant="secondary">Bulk-Import</Button></Link>
           <Link href="/products/new"><Button>Neues Produkt</Button></Link>
@@ -85,67 +88,137 @@ export default async function ProductsPage({
         />
       ) : products.length === 0 ? (
         <EmptyState title="Keine Treffer" description={`Kein Produkt passt zu "${q ?? ""}".`} />
+      ) : view === "grid" ? (
+        <ProductsGrid products={products} />
       ) : (
-        <>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {products.map((p) => {
-              const variantCount = Array.isArray(p.variants) ? p.variants.length : 0;
-              const headline = p.masterSku ?? p.name;
-              const subtitle = p.masterSku ? p.name : p.category ?? "Ohne Kategorie";
-              return (
-                <Card key={p.id}>
-                  <CardHeader>
-                    <CardTitle>
-                      <Link href={`/products/${p.id}`} className="hover:underline">
-                        {p.masterSku ? (
-                          <span className="font-mono text-base">{headline}</span>
-                        ) : (
-                          headline
-                        )}
-                      </Link>
-                    </CardTitle>
-                    <CardSubtitle className="truncate">{subtitle}</CardSubtitle>
-                  </CardHeader>
-                  <CardBody>
-                    <p className="line-clamp-3 text-sm text-slate-600">{p.description}</p>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {variantCount > 0 ? (
-                        <Badge variant="info">{variantCount} Varianten</Badge>
-                      ) : null}
-                      <Badge variant={p.analysis ? "success" : "warning"}>
-                        {p.analysis ? "KI-Analyse vorhanden" : "Analyse ausstehend"}
-                      </Badge>
-                      <Badge variant="muted">{p._count.leads} Leads</Badge>
-                      <Badge variant="muted">{p._count.searchRuns} Suchläufe</Badge>
-                    </div>
-                    <div className="mt-2 text-xs text-slate-400">
-                      {p.category ?? "Ohne Kategorie"} · {formatDateShort(p.createdAt)}
-                    </div>
-                  </CardBody>
-                </Card>
-              );
-            })}
-          </div>
-
-          {totalPages > 1 ? (
-            <div className="flex items-center justify-between text-sm text-slate-500">
-              <span>Seite {page} / {totalPages}</span>
-              <div className="flex gap-2">
-                {page > 1 ? (
-                  <Link href={pageHref(sp, page - 1)}>
-                    <Button variant="secondary" size="sm">Zurück</Button>
-                  </Link>
-                ) : null}
-                {page < totalPages ? (
-                  <Link href={pageHref(sp, page + 1)}>
-                    <Button variant="secondary" size="sm">Weiter</Button>
-                  </Link>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-        </>
+        <ProductsTable products={products} />
       )}
+
+      {totalPages > 1 && products.length > 0 ? (
+        <div className="flex items-center justify-between text-sm text-slate-500">
+          <span>Seite {page} / {totalPages}</span>
+          <div className="flex gap-2">
+            {page > 1 ? (
+              <Link href={pageHref(sp, page - 1)}>
+                <Button variant="secondary" size="sm">Zurück</Button>
+              </Link>
+            ) : null}
+            {page < totalPages ? (
+              <Link href={pageHref(sp, page + 1)}>
+                <Button variant="secondary" size="sm">Weiter</Button>
+              </Link>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type Row = {
+  id: string;
+  masterSku: string | null;
+  name: string;
+  description: string;
+  category: string | null;
+  createdAt: Date;
+  variants: unknown;
+  analysis: { id: string } | null;
+  _count: { leads: number; searchRuns: number };
+};
+
+function ProductsGrid({ products }: { products: Row[] }) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {products.map((p) => {
+        const variantCount = Array.isArray(p.variants) ? p.variants.length : 0;
+        const headline = p.masterSku ?? p.name;
+        const subtitle = p.masterSku ? p.name : p.category ?? "Ohne Kategorie";
+        return (
+          <Card key={p.id}>
+            <CardHeader>
+              <CardTitle>
+                <Link href={`/products/${p.id}`} className="hover:underline">
+                  {p.masterSku ? (
+                    <span className="font-mono text-base">{headline}</span>
+                  ) : (
+                    headline
+                  )}
+                </Link>
+              </CardTitle>
+              <CardSubtitle className="truncate">{subtitle}</CardSubtitle>
+            </CardHeader>
+            <CardBody>
+              <p className="line-clamp-3 text-sm text-slate-600">{p.description}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {variantCount > 0 ? (
+                  <Badge variant="info">{variantCount} Varianten</Badge>
+                ) : null}
+                <Badge variant={p.analysis ? "success" : "warning"}>
+                  {p.analysis ? "KI-Analyse vorhanden" : "Analyse ausstehend"}
+                </Badge>
+                <Badge variant="muted">{p._count.leads} Leads</Badge>
+                <Badge variant="muted">{p._count.searchRuns} Suchläufe</Badge>
+              </div>
+              <div className="mt-2 text-xs text-slate-400">
+                {p.category ?? "Ohne Kategorie"} · {formatDateShort(p.createdAt)}
+              </div>
+            </CardBody>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProductsTable({ products }: { products: Row[] }) {
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <table className="min-w-full text-sm">
+        <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th className="px-4 py-2.5 font-medium">AZ-Code</th>
+            <th className="px-4 py-2.5 font-medium">Produktname</th>
+            <th className="px-4 py-2.5 font-medium">Kategorie</th>
+            <th className="px-3 py-2.5 text-center font-medium">Varianten</th>
+            <th className="px-3 py-2.5 text-center font-medium">KI</th>
+            <th className="px-3 py-2.5 text-right font-medium">Leads</th>
+            <th className="px-3 py-2.5 text-right font-medium">Runs</th>
+            <th className="px-4 py-2.5 font-medium">Angelegt</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {products.map((p) => {
+            const variantCount = Array.isArray(p.variants) ? p.variants.length : 0;
+            return (
+              <tr key={p.id} className="hover:bg-slate-50">
+                <td className="px-4 py-2.5 font-mono text-xs text-slate-700">
+                  {p.masterSku ?? <span className="text-slate-300">—</span>}
+                </td>
+                <td className="px-4 py-2.5">
+                  <Link href={`/products/${p.id}`} className="font-medium text-slate-900 hover:underline">
+                    {p.name}
+                  </Link>
+                </td>
+                <td className="px-4 py-2.5 text-slate-600">{p.category ?? "—"}</td>
+                <td className="px-3 py-2.5 text-center tabular-nums text-slate-600">
+                  {variantCount > 0 ? variantCount : <span className="text-slate-300">—</span>}
+                </td>
+                <td className="px-3 py-2.5 text-center">
+                  {p.analysis ? (
+                    <Badge variant="success">✓</Badge>
+                  ) : (
+                    <Badge variant="muted">—</Badge>
+                  )}
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{p._count.leads}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{p._count.searchRuns}</td>
+                <td className="px-4 py-2.5 text-xs text-slate-500">{formatDateShort(p.createdAt)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
