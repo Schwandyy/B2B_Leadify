@@ -54,6 +54,23 @@ export default async function ProductsPage({
     }),
   ]);
 
+  // Lagerbestand: Map AZ-Code → verfügbarer Bestand für die Produkte
+  // dieser Seite. Leer, wenn (a) keine SKU oder (b) keine Snapshot-Zeile.
+  const skusOnPage = products
+    .map((p) => p.masterSku)
+    .filter((s): s is string => Boolean(s));
+  const stockRows =
+    skusOnPage.length > 0
+      ? await prisma.inventorySnapshot.findMany({
+          where: {
+            organizationId: user.organizationId,
+            masterSku: { in: skusOnPage },
+          },
+          select: { masterSku: true, availableStock: true },
+        })
+      : [];
+  const stockBySku = new Map(stockRows.map((r) => [r.masterSku, r.availableStock]));
+
   const allCount = await prisma.product.count({
     where: { organizationId: user.organizationId },
   });
@@ -89,9 +106,9 @@ export default async function ProductsPage({
       ) : products.length === 0 ? (
         <EmptyState title="Keine Treffer" description={`Kein Produkt passt zu "${q ?? ""}".`} />
       ) : view === "grid" ? (
-        <ProductsGrid products={products} />
+        <ProductsGrid products={products} stockBySku={stockBySku} />
       ) : (
-        <ProductsTable products={products} />
+        <ProductsTable products={products} stockBySku={stockBySku} />
       )}
 
       {totalPages > 1 && products.length > 0 ? (
@@ -127,13 +144,20 @@ type Row = {
   _count: { leads: number; searchRuns: number };
 };
 
-function ProductsGrid({ products }: { products: Row[] }) {
+function ProductsGrid({
+  products,
+  stockBySku,
+}: {
+  products: Row[];
+  stockBySku: Map<string, number>;
+}) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {products.map((p) => {
         const variantCount = Array.isArray(p.variants) ? p.variants.length : 0;
         const headline = p.masterSku ?? p.name;
         const subtitle = p.masterSku ? p.name : p.category ?? "Ohne Kategorie";
+        const stock = p.masterSku ? stockBySku.get(p.masterSku) : undefined;
         return (
           <Card key={p.id}>
             <CardHeader>
@@ -151,6 +175,11 @@ function ProductsGrid({ products }: { products: Row[] }) {
             <CardBody>
               <p className="line-clamp-3 text-sm text-slate-600">{p.description}</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
+                {stock !== undefined ? (
+                  <Badge variant={stock > 0 ? "success" : "danger"}>
+                    {stock > 0 ? `${stock} auf Lager` : "Ausverkauft"}
+                  </Badge>
+                ) : null}
                 {variantCount > 0 ? (
                   <Badge variant="info">{variantCount} Varianten</Badge>
                 ) : null}
@@ -171,7 +200,13 @@ function ProductsGrid({ products }: { products: Row[] }) {
   );
 }
 
-function ProductsTable({ products }: { products: Row[] }) {
+function ProductsTable({
+  products,
+  stockBySku,
+}: {
+  products: Row[];
+  stockBySku: Map<string, number>;
+}) {
   return (
     <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
       <table className="min-w-full text-sm">
@@ -180,6 +215,7 @@ function ProductsTable({ products }: { products: Row[] }) {
             <th className="px-4 py-2.5 font-medium">AZ-Code</th>
             <th className="px-4 py-2.5 font-medium">Produktname</th>
             <th className="px-4 py-2.5 font-medium">Kategorie</th>
+            <th className="px-3 py-2.5 text-right font-medium">Bestand</th>
             <th className="px-3 py-2.5 text-center font-medium">Varianten</th>
             <th className="px-3 py-2.5 text-center font-medium">KI</th>
             <th className="px-3 py-2.5 text-right font-medium">Leads</th>
@@ -190,6 +226,7 @@ function ProductsTable({ products }: { products: Row[] }) {
         <tbody className="divide-y divide-slate-100">
           {products.map((p) => {
             const variantCount = Array.isArray(p.variants) ? p.variants.length : 0;
+            const stock = p.masterSku ? stockBySku.get(p.masterSku) : undefined;
             return (
               <tr key={p.id} className="hover:bg-slate-50">
                 <td className="px-4 py-2.5 font-mono text-xs text-slate-700">
@@ -201,6 +238,15 @@ function ProductsTable({ products }: { products: Row[] }) {
                   </Link>
                 </td>
                 <td className="px-4 py-2.5 text-slate-600">{p.category ?? "—"}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">
+                  {stock === undefined ? (
+                    <span className="text-slate-300">—</span>
+                  ) : stock > 0 ? (
+                    <span className="text-slate-900">{stock}</span>
+                  ) : (
+                    <span className="font-medium text-rose-600">0</span>
+                  )}
+                </td>
                 <td className="px-3 py-2.5 text-center tabular-nums text-slate-600">
                   {variantCount > 0 ? variantCount : <span className="text-slate-300">—</span>}
                 </td>
