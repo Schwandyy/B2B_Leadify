@@ -78,6 +78,9 @@ model Product {
   ownerId         String
   owner           User     @relation(fields: [ownerId], references: [id])
 
+  // Master SKU groups variants (e.g. "AZ001" with 1er/3er/5er packs).
+  // Optional, but unique within an organization when set.
+  masterSku       String?
   name            String
   description     String   @db.Text
   productUrl      String?
@@ -92,6 +95,10 @@ model Product {
   attachmentPath  String?  // local path for MVP, S3 key later
   attachmentMime  String?
 
+  // Pack/SKU variants of the same master product. Each entry shape:
+  // { label, sku, packSize, price, url, raw }
+  variants        Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -99,6 +106,7 @@ model Product {
   searchRuns SearchRun[]
   leads      Lead[]
 
+  @@unique([organizationId, masterSku])
   @@index([organizationId])
 }
 

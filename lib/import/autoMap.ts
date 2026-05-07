@@ -1,17 +1,37 @@
 import type { ColumnMapping, ProductFieldKey } from "./types";
 
 // Keywords that should match a header (case-insensitive substring).
+// Long, specific phrases come first per field — autoMap picks the highest score.
 const FIELD_HINTS: Record<ProductFieldKey, string[]> = {
-  name: ["produktname", "product name", "artikelname", "artikel", "bezeichnung", "title", "titel", "name", "produkt"],
-  description: ["beschreibung", "description", "produktbeschreibung", "details", "info", "kurzbeschreibung", "long_description"],
-  productUrl: ["produkt-url", "produktlink", "product url", "product link", "url", "website", "link", "shoplink", "shop_url", "page", "datenblatt"],
-  category: ["kategorie", "category", "warengruppe", "produktgruppe", "type", "typ", "segment"],
-  targetRegion: ["region", "zielregion", "country", "land", "market", "markt"],
-  targetCustomerTypes: ["zielgruppe", "zielkunde", "kundentyp", "customer type", "target customer", "kundengruppe", "buyer", "audience"],
-  keywords: ["keywords", "schlagworte", "tags", "stichworte", "such", "search terms"],
+  masterSku: [
+    "master sku",
+    "master-sku",
+    "stamm-artikel",
+    "stamm artikel",
+    "parent sku",
+    "parent-sku",
+    "master",
+    "stamm",
+    "artikelnummer",
+    "artikel-nr",
+    "art-nr",
+    "sku",
+    "produkt-id",
+  ],
+  name: ["produktname", "product name", "artikelname", "bezeichnung", "title", "titel", "name", "produkt", "artikel"],
+  description: ["beschreibung", "description", "produktbeschreibung", "details", "kurzbeschreibung", "long_description", "info"],
+  productUrl: ["produkt-url", "produktlink", "product url", "product link", "shoplink", "shop_url", "datenblatt", "page", "website", "link", "url"],
+  category: ["kategorie", "category", "warengruppe", "produktgruppe", "segment", "type", "typ"],
+  targetRegion: ["zielregion", "region", "country", "land", "market", "markt"],
+  targetCustomerTypes: ["zielkunde", "zielgruppe", "kundentyp", "customer type", "target customer", "kundengruppe", "buyer", "audience"],
+  keywords: ["keywords", "schlagworte", "stichworte", "search terms", "tags"],
   exclusions: ["ausschluss", "exclusions", "blacklist", "exclude", "nicht für"],
-  priceRangeMin: ["preis von", "preis min", "price min", "min price", "vk min", "ek min"],
-  priceRangeMax: ["preis bis", "preis max", "price max", "max price", "vk max", "ek max", "uvp", "list price"],
+  priceRangeMin: ["preis von", "preis min", "price min", "min price", "vk min", "ek min", "ek-min", "vk-min"],
+  priceRangeMax: ["preis bis", "preis max", "price max", "max price", "vk max", "ek max", "uvp", "list price", "ek-max", "vk-max"],
+  variantLabel: ["variante", "variant", "ausführung", "ausfuehrung", "pack", "größe", "groesse", "size"],
+  variantSku: ["asin", "ean", "gtin", "varianten-sku", "variant sku", "varianten sku", "barcode", "isbn"],
+  variantPackSize: ["stückzahl", "stueckzahl", "anzahl", "menge", "pack size", "packgröße", "packgroesse"],
+  variantPrice: ["ek", "vk", "preis", "price", "uvp", "vk-preis", "ek-preis"],
 };
 
 const FIELDS = Object.keys(FIELD_HINTS) as ProductFieldKey[];

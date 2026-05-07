@@ -11,6 +11,7 @@ export type ParseResult = {
 
 // What a row maps to in the Product model.
 export type ProductFieldKey =
+  | "masterSku"
   | "name"
   | "description"
   | "productUrl"
@@ -20,7 +21,11 @@ export type ProductFieldKey =
   | "keywords"
   | "exclusions"
   | "priceRangeMin"
-  | "priceRangeMax";
+  | "priceRangeMax"
+  | "variantLabel"
+  | "variantSku"
+  | "variantPackSize"
+  | "variantPrice";
 
 // header → product field
 export type ColumnMapping = Partial<Record<ProductFieldKey, string>>;
