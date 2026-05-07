@@ -36,9 +36,16 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           <Link href="/products" className="text-xs text-slate-500 hover:text-slate-900">
             ← Produkte
           </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{product.name}</h1>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+            {product.masterSku ? (
+              <>
+                <span className="font-mono">{product.masterSku}</span>
+                <span className="text-slate-400"> — </span>
+              </>
+            ) : null}
+            {product.name}
+          </h1>
           <p className="text-sm text-slate-500">
-            {product.masterSku ? <span className="mr-2 font-mono text-xs text-slate-700">{product.masterSku}</span> : null}
             {product.category ?? "Ohne Kategorie"} · {product.targetRegion ?? "Region offen"} · angelegt am{" "}
             {formatDateShort(product.createdAt)}
           </p>
