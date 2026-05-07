@@ -27,8 +27,6 @@ export default async function InventoryAdminPage() {
   const initial = source
     ? {
         sheetUrl: source.sheetUrl,
-        gid: source.gid ?? "",
-        headerRow: source.headerRow ? String(source.headerRow) : "",
         description: source.description ?? "",
         skuColumn: source.skuColumn,
         stockColumn: source.stockColumn,
