@@ -2,7 +2,11 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { consolidateByMasterSku, purgeMasterSkulessProducts } from "@/lib/products/consolidate";
+import {
+  consolidateByMasterSku,
+  purgeMasterSkulessProducts,
+  purgeAllProductsWithoutLeads,
+} from "@/lib/products/consolidate";
 import { Button } from "@/components/ui/button";
 
 export function ConsolidateProductsButton() {
@@ -36,6 +40,23 @@ export function ConsolidateProductsButton() {
     });
   }
 
+  function runFullReset() {
+    if (
+      !confirm(
+        "Wirklich ALLE Produkte ohne Leads löschen (auch die mit ASIN-als-Master-SKU)? Produkte mit angereicherten Leads bleiben erhalten.",
+      )
+    )
+      return;
+    setStatus(null);
+    start(async () => {
+      const r = await purgeAllProductsWithoutLeads();
+      setStatus(
+        `${r.deleted} Produkte gelöscht. ${r.keptWithLeads} blieben (haben bereits Leads).`,
+      );
+      router.refresh();
+    });
+  }
+
   if (!open) {
     return (
       <Button variant="secondary" size="md" onClick={() => setOpen(true)}>
@@ -50,7 +71,10 @@ export function ConsolidateProductsButton() {
         Master-SKU-Duplikate zusammenfassen
       </Button>
       <Button variant="danger" size="sm" disabled={pending} onClick={runPurge}>
-        Master-SKU-lose ohne Leads löschen
+        Nur Master-SKU-lose ohne Leads löschen
+      </Button>
+      <Button variant="danger" size="sm" disabled={pending} onClick={runFullReset}>
+        Alle ohne Leads löschen (Reset)
       </Button>
       <Button variant="ghost" size="sm" onClick={() => { setOpen(false); setStatus(null); }}>
         Schließen

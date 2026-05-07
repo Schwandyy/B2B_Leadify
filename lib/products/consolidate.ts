@@ -118,11 +118,26 @@ export async function consolidateByMasterSku(): Promise<ConsolidateResult> {
  * to avoid surprise data loss.
  */
 export async function purgeMasterSkulessProducts(): Promise<{ deleted: number; keptWithLeads: number }> {
+  return purgeProducts({ onlyMissingMasterSku: true });
+}
+
+/**
+ * Deletes ALL products that have no leads attached — broader cleanup variant
+ * for when an earlier import wrote the wrong column into masterSku and the
+ * user wants a fresh re-import.
+ */
+export async function purgeAllProductsWithoutLeads(): Promise<{ deleted: number; keptWithLeads: number }> {
+  return purgeProducts({ onlyMissingMasterSku: false });
+}
+
+async function purgeProducts(opts: { onlyMissingMasterSku: boolean }): Promise<{ deleted: number; keptWithLeads: number }> {
   const user = await requireUser();
   const orgId = user.organizationId;
 
   const candidates = await prisma.product.findMany({
-    where: { organizationId: orgId, masterSku: null },
+    where: opts.onlyMissingMasterSku
+      ? { organizationId: orgId, masterSku: null }
+      : { organizationId: orgId },
     select: { id: true, _count: { select: { leads: true } } },
   });
 

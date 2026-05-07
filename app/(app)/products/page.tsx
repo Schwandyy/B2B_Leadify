@@ -32,7 +32,7 @@ export default async function ProductsPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          {withoutSku > 0 ? <ConsolidateProductsButton /> : null}
+          {products.length > 0 ? <ConsolidateProductsButton /> : null}
           <Link href="/products/import"><Button variant="secondary">Bulk-Import</Button></Link>
           <Link href="/products/new"><Button>Neues Produkt</Button></Link>
         </div>

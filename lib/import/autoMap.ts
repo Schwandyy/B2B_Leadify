@@ -4,19 +4,35 @@ import type { ColumnMapping, ProductFieldKey } from "./types";
 // Long, specific phrases come first per field — autoMap picks the highest score.
 const FIELD_HINTS: Record<ProductFieldKey, string[]> = {
   masterSku: [
+    // workspace-spezifische Codes
+    "az-code",
+    "az code",
+    "az-nummer",
+    "az nummer",
+    "az-nr",
+    "az nr",
+    "az-art",
+    "interne artikelnummer",
+    "interner code",
+    "intern artikel",
+    // klassische Master-SKU-Bezeichner
     "master sku",
     "master-sku",
     "stamm-artikel",
     "stamm artikel",
+    "stamm-sku",
     "parent sku",
     "parent-sku",
     "master",
     "stamm",
+    "produkt-id",
+    "product id",
     "artikelnummer",
     "artikel-nr",
     "art-nr",
+    "art nr",
+    // generisches "sku" zuletzt — soll nicht "Variant-SKU" überstimmen
     "sku",
-    "produkt-id",
   ],
   name: ["produktname", "product name", "artikelname", "bezeichnung", "title", "titel", "name", "produkt", "artikel"],
   description: ["beschreibung", "description", "produktbeschreibung", "details", "kurzbeschreibung", "long_description", "info"],

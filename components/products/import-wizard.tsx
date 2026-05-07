@@ -56,6 +56,17 @@ type ImportRunResult = {
   items: ImportItemResult[];
 };
 
+function KeyMap({ label, header, highlight }: { label: string; header?: string; highlight?: boolean }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <dt className="text-xs opacity-70">{label}:</dt>
+      <dd className={"font-medium " + (header ? (highlight ? "" : "") : "italic opacity-60")}>
+        {header ?? "— leer —"}
+      </dd>
+    </div>
+  );
+}
+
 const FIELD_LABELS: Array<[keyof Mapping, string, string?]> = [
   ["masterSku", "Master-SKU", "konsolidiert Varianten"],
   ["name", "Produktname", "Pflicht"],
@@ -274,6 +285,30 @@ export function ImportWizard() {
                 </ul>
               </div>
             ) : null}
+
+            <div
+              className={
+                "rounded-xl border px-4 py-3 text-sm " +
+                (mapping.masterSku
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                  : "border-amber-300 bg-amber-50 text-amber-900")
+              }
+            >
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide opacity-80">
+                Schlüssel-Zuordnung
+              </div>
+              <dl className="grid gap-1 sm:grid-cols-3">
+                <KeyMap label="Master-SKU (AZ-Code)" header={mapping.masterSku} highlight />
+                <KeyMap label="Produktname" header={mapping.name} />
+                <KeyMap label="Variant-SKU (ASIN)" header={mapping.variantSku} />
+              </dl>
+              {!mapping.masterSku ? (
+                <div className="mt-2 text-xs">
+                  ⚠ Ohne Master-SKU wird <strong>jede Zeile als eigenes Produkt</strong> angelegt — Varianten werden
+                  nicht zusammengefasst. Wähle unten die Spalte mit deinem AZ-Code als Master-SKU.
+                </div>
+              ) : null}
+            </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {FIELD_LABELS.map(([field, label, hint]) => (
