@@ -4,8 +4,20 @@
  */
 export const PROMPT_VERSION = "2026-05-07.1";
 
-export const SYSTEM_PROMPT_DE =
-  "Du bist ein Senior B2B Sales Strategist und Recherche-Analyst. Du arbeitest auf Deutsch. Du lieferst präzise, aktionsorientierte Analysen für Vertrieb und Marketing. Keine Marketing-Floskeln. Du nennst nie erfundene Quellen.";
+export const SYSTEM_PROMPT_DE = [
+  "Du bist ein Senior B2B Sales Strategist und Recherche-Analyst.",
+  "Sprache: Deutsch.",
+  "Lieferprinzip: präzise, produktnah, aktionsorientiert.",
+  "VERBOTEN:",
+  "- Marketing-Floskeln ('innovativ', 'zukunftssicher', 'Sie können …')",
+  "- Allgemeine Phrasen, die für 80% aller Produkte gelten würden",
+  "- Erfundene Quellen, Marken, Zahlen, Kunden",
+  "- Schulen / Maker als Default-Antwort, wenn das Produkt offenkundig nicht dafür ist",
+  "PFLICHT:",
+  "- Konkret auf das beschriebene Produkt eingehen — Fachbegriffe aus der Beschreibung übernehmen",
+  "- Branchen / Käufer / Anwendungsfälle aus den technischen Daten ableiten, nicht aus Bauchgefühl",
+  "- Wenn die Beschreibung dünn ist, das ehrlich vermerken statt zu fabulieren",
+].join("\n");
 
 export type ProductInput = {
   name: string;
@@ -52,7 +64,20 @@ export const productAnalysisPrompt = {
   build(p: ProductInput): string {
     return [
       "Analysiere das folgende Produkt für eine B2B-Akquise-Strategie.",
-      "Gib konkrete, recherchierbare Begriffe und realistische Branchen.",
+      "Lies die Produktbeschreibung GENAU und beziehe dich in jedem Feld der Antwort auf konkrete technische Eigenschaften.",
+      "",
+      "Vorgehen pro Feld:",
+      "- shortDescription: 1 Satz, was das Produkt technisch ist (kein Marketing).",
+      "- valueProposition: 1 Satz Nutzen für einen B2B-Käufer, nicht für einen Endkunden.",
+      "- problemsSolved: 3-5 konkrete Probleme, die DAS PRODUKT laut Spezifikation löst (keine Floskeln).",
+      "- relevantIndustries: branchenspezifische Begriffe, abgeleitet aus technischer Funktion (z. B. bei OLED-Display: Industrie-HMI, Medizingeräte-Hersteller, IoT-Anbieter — NICHT pauschal 'Bildung').",
+      "- buyerRoles: konkrete Einkäufer-/Engineering-Rollen, die das Bauteil/Produkt einkaufen würden.",
+      "- companyTypes: Firmenarten, die DIESES spezifische Bauteil verbauen oder weiterverkaufen.",
+      "- searchTerms: 5-8 Suchbegriffe, mit denen man echte Käufer finden kann (deutsche B2B-Welt).",
+      "- competitorOverlap: andere Marken/Hersteller, die ein ähnliches Bauteil herstellen.",
+      "- pitchArguments: 3 Verkaufsargumente, die NUR für dieses Produkt stimmen.",
+      "- objections: 2-3 Einwände, die ein Einkäufer hier wirklich vorbringen würde.",
+      "- searchStrategy: konkreter 3-Schritte-Plan, wie man Käufer findet — keine Allgemeinplätze.",
       "",
       formatProduct(p),
     ].join("\n");
