@@ -39,37 +39,41 @@ export async function searchAzDeliveryByName(name: string): Promise<AzDeliveryRe
 
   const $ = cheerio.load(search.html);
 
-  // AZ-Delivery zeigt bei 0 Treffern eine Empfehlungs-Sektion — wir würden sonst
-  // ein zufälliges Produkt zurückgeben. Anhand des Headers "Es konnten leider
-  // keine Ergebnisse" / "0 Produkte" / "Keine Treffer" abbrechen.
-  const fullText = $("body").text().toLowerCase();
-  const noResults =
-    /keine ergebnisse|keine treffer|leider keine|0 produkte|nichts gefunden|no results/.test(fullText);
-  if (noResults) {
+  // Sammle alle Produkt-Pfade auf der Seite (eindeutig).
+  const productPaths: string[] = [];
+  const seenPaths = new Set<string>();
+  $('a[href^="/products/"]').each((_, el) => {
+    const href = $(el).attr("href")!;
+    const path = href.split("?")[0];
+    if (!seenPaths.has(path)) {
+      seenPaths.add(path);
+      productPaths.push(path);
+    }
+  });
+
+  // Filter den 'Default-Empfehlungs-Produkte'-Eintrag heraus, der bei 0-Treffer-Suchen
+  // als Featured-Tile angezeigt wird (Solarpanel).
+  const RECOMMENDATION_FALLBACK_PATH =
+    "/products/50w-tragbares-solarpanel-mit-efte-beschichtung-solarpanel-faltbar-mit-usb-type-c-dc-anschluss-solartasche-ip67-wasserdicht-camping-solar-panel-fur-outdoor-wohnmobil-caravan";
+  const realPaths = productPaths.filter((p) => p !== RECOMMENDATION_FALLBACK_PATH);
+
+  if (realPaths.length === 0) {
     return { ok: false, reason: `Keine Treffer auf az-delivery.de für "${cleaned}".` };
   }
 
-  // Bevorzuge Links unter dem Such-Result-Container, nicht aus Footer/Empfehlungen.
+  // Bevorzuge Links aus dem Such-Result-Container.
   let firstProductPath: string | null = null;
   $(".collection a[href^='/products/'], .product-grid a[href^='/products/'], main a[href^='/products/']").each(
     (_, el) => {
       if (firstProductPath) return false;
       const href = $(el).attr("href")!;
-      firstProductPath = href.split("?")[0];
+      const path = href.split("?")[0];
+      if (path === RECOMMENDATION_FALLBACK_PATH) return undefined;
+      firstProductPath = path;
       return undefined;
     },
   );
-  // Fallback auf alle Produkt-Links (falls Markup anders ist)
-  if (!firstProductPath) {
-    $('a[href^="/products/"]').each((_, el) => {
-      if (firstProductPath) return false;
-      const href = $(el).attr("href")!;
-      firstProductPath = href.split("?")[0];
-      return undefined;
-    });
-  }
-
-  if (!firstProductPath) return { ok: false, reason: "Keine Produkte für diese Suche gefunden." };
+  if (!firstProductPath) firstProductPath = realPaths[0];
 
   const productUrl = `https://www.az-delivery.de${firstProductPath}`;
   const product = await get(productUrl);

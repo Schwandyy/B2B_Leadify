@@ -28,30 +28,47 @@ export type EnrichmentOutcome =
   | { ok: false; reason: string; tried: string[] };
 
 /**
- * Tries to load real product info for a given Product. Strategy:
- *  1. If Amazon URL + ASIN: parse amazon.de/dp/<asin>.
- *  2. Otherwise (or if Amazon yields nothing): search az-delivery.de
- *     by product name and parse the first hit.
+ * Tries to load real product info for a given Product.
+ *
+ * For AZ-Delivery products (the typical case in this workspace), the home
+ * shop on az-delivery.de is the cleanest source: Shopify-based, exposes a
+ * JSON-LD Product object, no anti-bot. We try it first by name. Only when
+ * that fails do we fall through to amazon.de — Amazon will rate-limit any
+ * server-side crawler aggressively, so it must not be the default path.
  */
-export async function enrichProduct(args: { name: string; productUrl?: string | null }): Promise<EnrichmentOutcome> {
+export async function enrichProduct(args: {
+  name: string;
+  productUrl?: string | null;
+  options?: EnrichOptions;
+}): Promise<EnrichmentOutcome> {
   const tried: string[] = [];
+  const opts: EnrichOptions = args.options ?? {};
+  let lastReason = "Kein Crawl-Pfad versucht.";
 
-  if (args.productUrl) {
+  if (!opts.skipAzDelivery) {
+    tried.push(`az-delivery.de search "${args.name}"`);
+    const az = await searchAzDeliveryByName(args.name);
+    if (az.ok) return { ok: true, snapshot: azToSnapshot(az), tried };
+    lastReason = `AZ-Delivery: ${az.reason}`;
+  }
+
+  if (!opts.skipAmazon && args.productUrl) {
     const asin = extractAsin(args.productUrl);
     if (asin) {
       tried.push(`amazon.de/dp/${asin}`);
       const amazon = await fetchAmazonProduct(args.productUrl);
       if (amazon.ok) return { ok: true, snapshot: amazonToSnapshot(amazon), tried };
-      // Fall through to AZ-Delivery fallback.
+      lastReason = `Amazon: ${amazon.reason}`;
     }
   }
 
-  tried.push(`az-delivery.de search "${args.name}"`);
-  const az = await searchAzDeliveryByName(args.name);
-  if (az.ok) return { ok: true, snapshot: azToSnapshot(az), tried };
-
-  return { ok: false, reason: az.reason, tried };
+  return { ok: false, reason: lastReason, tried };
 }
+
+export type EnrichOptions = {
+  skipAmazon?: boolean;
+  skipAzDelivery?: boolean;
+};
 
 function amazonToSnapshot(p: AmazonProduct): ProductSnapshot {
   return {
