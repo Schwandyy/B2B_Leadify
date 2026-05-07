@@ -69,25 +69,69 @@ export default async function ProductsPage({
     ...(conditions.length > 0 ? { AND: conditions } : {}),
   };
 
-  const [total, withSku, products] = await Promise.all([
-    prisma.product.count({ where }),
-    prisma.product.count({
-      where: { organizationId: user.organizationId, masterSku: { not: null } },
-    }),
-    prisma.product.findMany({
+  const withSku = await prisma.product.count({
+    where: { organizationId: user.organizationId, masterSku: { not: null } },
+  });
+
+  type ProductRow = Prisma.ProductGetPayload<{
+    include: {
+      analysis: { select: { id: true } };
+      _count: { select: { leads: true; searchRuns: true } };
+    };
+  }>;
+  let total: number;
+  let products: ProductRow[];
+
+  if (sortKey === "stock") {
+    // Bestand-Sortierung: lebt in einer separaten Tabelle (InventorySnapshot).
+    // Wir holen alle gefilterten Produkte, sortieren in JS und paginieren.
+    // Bei den ~500 Produkten der Plattform unkritisch.
+    const all = await prisma.product.findMany({
       where,
-      orderBy,
+      orderBy: { masterSku: "asc" },
       include: {
         analysis: { select: { id: true } },
         _count: { select: { leads: true, searchRuns: true } },
       },
-      take: PAGE_SIZE,
-      skip: (page - 1) * PAGE_SIZE,
-    }),
-  ]);
+    });
+    const allSkus = all.map((p) => p.masterSku).filter((s): s is string => Boolean(s));
+    const stockMap = new Map<string, number>();
+    if (allSkus.length > 0) {
+      const rows = await prisma.inventorySnapshot.findMany({
+        where: { organizationId: user.organizationId, masterSku: { in: allSkus } },
+        select: { masterSku: true, availableStock: true },
+      });
+      for (const r of rows) stockMap.set(r.masterSku, r.availableStock);
+    }
+    // Produkte ohne Snapshot landen am Ende — unabhängig von asc/desc.
+    const sentinel = sortDir === "asc" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+    all.sort((a, b) => {
+      const sa = a.masterSku ? stockMap.get(a.masterSku) ?? sentinel : sentinel;
+      const sb = b.masterSku ? stockMap.get(b.masterSku) ?? sentinel : sentinel;
+      if (sa === sb) return (a.masterSku ?? "").localeCompare(b.masterSku ?? "");
+      return sortDir === "asc" ? sa - sb : sb - sa;
+    });
+    total = all.length;
+    products = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  } else {
+    [total, products] = await Promise.all([
+      prisma.product.count({ where }),
+      prisma.product.findMany({
+        where,
+        orderBy,
+        include: {
+          analysis: { select: { id: true } },
+          _count: { select: { leads: true, searchRuns: true } },
+        },
+        take: PAGE_SIZE,
+        skip: (page - 1) * PAGE_SIZE,
+      }),
+    ]);
+  }
 
-  // Lagerbestand: Map AZ-Code → verfügbarer Bestand für die Produkte
-  // dieser Seite. Leer, wenn (a) keine SKU oder (b) keine Snapshot-Zeile.
+  // Lagerbestand-Map für die aktuell gerenderte Seite. Bei stock-Sort haben
+  // wir die Werte schon, aber wir holen sie nochmal frisch — billiger als
+  // den Map durchzuschleifen und konsistent für beide Pfade.
   const skusOnPage = products
     .map((p) => p.masterSku)
     .filter((s): s is string => Boolean(s));
@@ -329,8 +373,8 @@ function ProductsTable({
             <th className="px-4 py-2.5">
               <SortableHeader label="Kategorie" sortKey="category" />
             </th>
-            <th className="px-3 py-2.5 text-right font-medium uppercase tracking-wide text-slate-500">
-              Bestand
+            <th className="px-3 py-2.5">
+              <SortableHeader label="Bestand" sortKey="stock" align="right" />
             </th>
             <th className="px-3 py-2.5 text-center font-medium uppercase tracking-wide text-slate-500">
               Varianten
@@ -486,7 +530,15 @@ function computeAgeDays(syncedAt: Date): number {
   return (Date.now() - syncedAt.getTime()) / 86_400_000;
 }
 
-const VALID_SORT_KEYS: SortKey[] = ["masterSku", "name", "category", "leads", "runs", "createdAt"];
+const VALID_SORT_KEYS: SortKey[] = [
+  "masterSku",
+  "name",
+  "category",
+  "stock",
+  "leads",
+  "runs",
+  "createdAt",
+];
 
 function parseSortKey(input: string | undefined): SortKey {
   if (input && (VALID_SORT_KEYS as string[]).includes(input)) return input as SortKey;

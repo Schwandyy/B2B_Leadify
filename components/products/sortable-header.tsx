@@ -7,6 +7,7 @@ export type SortKey =
   | "masterSku"
   | "name"
   | "category"
+  | "stock"
   | "leads"
   | "runs"
   | "createdAt";
