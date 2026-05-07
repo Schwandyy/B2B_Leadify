@@ -1,0 +1,69 @@
+import Link from "next/link";
+import { requireUser } from "@/lib/auth/session";
+import { prisma } from "@/lib/db/prisma";
+import { Card, CardBody, CardHeader, CardSubtitle, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty";
+import { formatDateShort } from "@/lib/utils/format";
+
+export default async function ProductsPage() {
+  const user = await requireUser();
+  const products = await prisma.product.findMany({
+    where: { organizationId: user.organizationId },
+    orderBy: { createdAt: "desc" },
+    include: {
+      analysis: { select: { id: true } },
+      _count: { select: { leads: true, searchRuns: true } },
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Produkte</h1>
+          <p className="text-sm text-slate-500">
+            Verwalten Sie die Produkte, für die Leads generiert werden.
+          </p>
+        </div>
+        <Link href="/products/new"><Button>Neues Produkt</Button></Link>
+      </div>
+
+      {products.length === 0 ? (
+        <EmptyState
+          title="Noch kein Produkt angelegt"
+          description="Mit einem Produkt startet die Reise: KI-Analyse, Suchläufe und Leadgenerierung."
+          action={<Link href="/products/new"><Button size="sm">Erstes Produkt anlegen</Button></Link>}
+        />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {products.map((p) => (
+            <Card key={p.id}>
+              <CardHeader>
+                <CardTitle>
+                  <Link href={`/products/${p.id}`} className="hover:underline">
+                    {p.name}
+                  </Link>
+                </CardTitle>
+                <CardSubtitle>
+                  {p.category ?? "Ohne Kategorie"} · angelegt am {formatDateShort(p.createdAt)}
+                </CardSubtitle>
+              </CardHeader>
+              <CardBody>
+                <p className="line-clamp-3 text-sm text-slate-600">{p.description}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Badge variant={p.analysis ? "success" : "warning"}>
+                    {p.analysis ? "KI-Analyse vorhanden" : "Analyse ausstehend"}
+                  </Badge>
+                  <Badge variant="muted">{p._count.leads} Leads</Badge>
+                  <Badge variant="muted">{p._count.searchRuns} Suchläufe</Badge>
+                </div>
+              </CardBody>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
