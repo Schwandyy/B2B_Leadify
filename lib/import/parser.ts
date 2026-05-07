@@ -17,36 +17,97 @@ export async function parseUpload(file: File): Promise<ParseResult> {
   return workbookToResult(workbook, isCsv ? "csv" : "excel");
 }
 
+const GOOGLE_FETCH_HEADERS: HeadersInit = {
+  // Google's edge serves a different response for "browser-like" agents:
+  // server-side fetch without UA gets bounced to a sign-in page even for
+  // link-shared sheets. A real-browser-shaped UA fixes that.
+  "User-Agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  Accept: "text/csv, text/plain, */*",
+  "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+};
+
+type SheetIds = { spreadsheetId: string; gid: string };
+
 /**
- * Fetch a public Google Sheet (sharing must be "Viewable with the link" or
- * fully public). We accept either a normal /edit URL or an /export URL —
- * we transform it into the CSV export endpoint so we never need OAuth.
+ * Fetch a public Google Sheet. Sharing must be at least "Viewable with the link".
+ *
+ * Google has multiple CSV endpoints with different quirks:
+ *  - /export?format=csv      works when "Anyone with the link can view"
+ *  - /gviz/tq?tqx=out:csv    same access rules, often more permissive about
+ *                            UA, gives clearer errors
+ *  - /pub?output=csv         only works when "Publish to web" is enabled
+ *
+ * We try (1), then (2) — if both fail with HTML, the user almost certainly
+ * needs "Anyone with the link" instead of restricted sharing.
  */
 export async function parseGoogleSheet(url: string): Promise<ParseResult> {
-  const exportUrl = toCsvExportUrl(url);
-  if (!exportUrl) {
+  const ids = parseSheetIds(url);
+  if (!ids) {
     throw new Error(
-      "Konnte die Google-Sheets-URL nicht in eine Export-URL umwandeln. Stelle sicher, dass das Sheet öffentlich oder mit Link freigegeben ist.",
+      "Konnte die Google-Sheets-URL nicht lesen. Bitte die normale Tabellen-URL einfügen (https://docs.google.com/spreadsheets/d/...).",
     );
   }
-  const res = await fetch(exportUrl, { redirect: "follow" });
-  if (!res.ok) {
-    throw new Error(
-      `Google-Sheet konnte nicht geladen werden (HTTP ${res.status}). Ist die Freigabe 'Jeder mit Link' gesetzt?`,
-    );
+
+  const attempts = [
+    `https://docs.google.com/spreadsheets/d/${ids.spreadsheetId}/export?format=csv&gid=${ids.gid}`,
+    `https://docs.google.com/spreadsheets/d/${ids.spreadsheetId}/gviz/tq?tqx=out:csv&gid=${ids.gid}`,
+  ];
+
+  let lastError = "";
+  for (const endpoint of attempts) {
+    const csv = await tryFetchCsv(endpoint);
+    if (csv.kind === "ok") {
+      const workbook = XLSX.read(csv.body, { type: "string" });
+      return workbookToResult(workbook, "google-sheets");
+    }
+    lastError = csv.error;
   }
-  const text = await res.text();
-  // Quick sanity check: Google sometimes returns HTML for permission errors.
-  if (text.startsWith("<")) {
-    throw new Error(
-      "Google liefert HTML statt CSV — meist ein Berechtigungsproblem. Setze die Freigabe auf 'Jeder mit Link'.",
-    );
-  }
-  const workbook = XLSX.read(text, { type: "string" });
-  return workbookToResult(workbook, "google-sheets");
+
+  throw new Error(
+    `Google-Sheet konnte nicht als CSV gelesen werden. ${lastError} ` +
+      "Bitte unter 'Freigeben' sicherstellen, dass 'Jeder, der über den Link verfügt' (Viewer) eingestellt ist — restriktivere Modi (z. B. 'Restricted') reichen nicht.",
+  );
 }
 
-function toCsvExportUrl(url: string): string | null {
+type FetchResult = { kind: "ok"; body: string } | { kind: "fail"; error: string };
+
+async function tryFetchCsv(endpoint: string): Promise<FetchResult> {
+  let res: Response;
+  try {
+    res = await fetch(endpoint, { redirect: "follow", headers: GOOGLE_FETCH_HEADERS });
+  } catch (err) {
+    return { kind: "fail", error: `Netzwerkfehler: ${err instanceof Error ? err.message : "fetch failed"}.` };
+  }
+  if (!res.ok) {
+    return { kind: "fail", error: `HTTP ${res.status} bei ${new URL(endpoint).pathname}.` };
+  }
+  const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+  const body = await res.text();
+  // Anything HTML-ish means Google didn't actually deliver the CSV: usually
+  // an interstitial sign-in page, an "AccessDenied" or rate-limit page.
+  const looksLikeHtml = contentType.includes("html") || /^\s*</.test(body);
+  if (looksLikeHtml) {
+    return { kind: "fail", error: classifyHtml(body) };
+  }
+  if (!body.trim()) {
+    return { kind: "fail", error: "Antwort war leer." };
+  }
+  return { kind: "ok", body };
+}
+
+function classifyHtml(body: string): string {
+  const lower = body.toLowerCase();
+  if (lower.includes("accounts.google.com") || lower.includes("servicelogin") || lower.includes("signin")) {
+    return "Google fordert einen Login an — Freigabe ist noch privat.";
+  }
+  if (lower.includes("rate limit") || lower.includes("quota")) {
+    return "Google meldet ein Rate-Limit — bitte kurz warten und erneut versuchen.";
+  }
+  return "Google liefert HTML statt CSV (vermutlich Berechtigungsproblem).";
+}
+
+function parseSheetIds(url: string): SheetIds | null {
   try {
     const u = new URL(url.trim());
     if (!u.hostname.endsWith("docs.google.com")) return null;
@@ -56,7 +117,7 @@ function toCsvExportUrl(url: string): string | null {
     const gidFromHash = new URLSearchParams(u.hash.replace(/^#/, "")).get("gid");
     const gidFromQuery = u.searchParams.get("gid");
     const gid = gidFromQuery ?? gidFromHash ?? "0";
-    return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+    return { spreadsheetId: id, gid };
   } catch {
     return null;
   }
