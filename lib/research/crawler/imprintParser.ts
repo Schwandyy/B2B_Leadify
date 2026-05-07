@@ -16,7 +16,13 @@ export type ImprintFields = {
   zipCode?: string;
 };
 
-const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+// TLD-whitelist makes the regex non-greedy across glued text — without this,
+// "info@x.deabonnentenbetreuung" would match as if the TLD were "deabonnen…".
+const ALLOWED_TLD = "(?:de|com|at|ch|net|org|eu|info|io|shop|store|app|gmbh|ag|email|tech|cloud|coop|biz|berlin|hamburg|munich|cologne)";
+const EMAIL_RE = new RegExp(
+  String.raw`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.${ALLOWED_TLD}\b`,
+  "g",
+);
 
 // Phone numbers — international + common German formats.
 const PHONE_RE =
@@ -53,6 +59,20 @@ const NON_CITY_TOKENS = new Set([
 export function parseImprintHtml(html: string): ImprintFields {
   const $ = cheerio.load(html);
   $("script, style, noscript, svg, header, footer nav").remove();
+
+  // Block-level elements without inter-element whitespace cause Cheerio's
+  // .text() to glue them together (e.g. <div>info@x.de</div><div>Tel: …</div>
+  // becomes "info@x.deTel: …"). Inject a space at the start of every block
+  // tag so .text() yields properly tokenised content.
+  $("br").replaceWith(" ");
+  $("p, div, span, li, td, th, h1, h2, h3, h4, h5, h6, address, dt, dd, section").each((_, el) => {
+    $(el).prepend(" ");
+  });
+  // mailto links should keep a space *before* the address.
+  $('a[href^="mailto:"], a[href^="tel:"]').each((_, el) => {
+    $(el).prepend(" ").append(" ");
+  });
+
   const text = collapseWhitespace($("body").text());
 
   const emails = extractEmails(text, $);
@@ -63,7 +83,7 @@ export function parseImprintHtml(html: string): ImprintFields {
   const city = zipMatch?.[2]?.split(/\s+/)[0];
 
   const country = guessCountryFromText(text);
-  const companyName = guessCompanyName(text);
+  const companyName = guessCompanyName(text, $);
   const postalAddress = extractPostalAddress(text, zipMatch?.[0] ?? undefined);
 
   return {
@@ -154,14 +174,84 @@ function guessCountryFromText(text: string): string | undefined {
   return undefined;
 }
 
-function guessCompanyName(text: string): string | undefined {
-  // German Impressum usually starts with the company name + legal form.
-  const m = text.match(/(?:Anbieter|Betreiber)[^A-Za-z0-9]{0,20}([A-ZÄÖÜ][\w&.\-\s]{2,80}?(?:GmbH|AG|UG|GbR|KG|OHG|e\.K\.|e\.V\.|Co\. KG|GmbH & Co\. KG))/);
-  if (m?.[1]) return m[1].trim();
-  // Fallback: first occurrence of "Name + Rechtsform"
-  const m2 = text.match(/([A-ZÄÖÜ][\wäöüß&.\-\s]{2,80}?)\s+(GmbH|AG|UG|GbR|KG|OHG|e\.K\.|e\.V\.|Co\. KG|GmbH & Co\. KG)\b/);
-  if (m2?.[0]) return m2[0].trim();
+/** Junky tokens that often appear glued to the company name in raw text. */
+const NAME_BLACKLIST_PHRASES = [
+  "copyright",
+  "©",
+  "privacy policy",
+  "datenschutz",
+  "impressum",
+  "kontakt",
+  "haftungsausschluss",
+  "weee",
+  "anbieter",
+  "betreiber",
+  "verantwortlich",
+  "all rights reserved",
+];
+
+function guessCompanyName(text: string, $: cheerio.CheerioAPI): string | undefined {
+  // 1. og:site_name / application-name: most reliable on professional sites.
+  const og = $('meta[property="og:site_name"]').attr("content")?.trim();
+  if (og && isPlausibleCompanyName(og)) return og;
+  const app = $('meta[name="application-name"]').attr("content")?.trim();
+  if (app && isPlausibleCompanyName(app)) return app;
+
+  // 2. JSON-LD Organization @type — high precision when available.
+  let jsonLdName: string | undefined;
+  $('script[type="application/ld+json"]').each((_, el) => {
+    if (jsonLdName) return false;
+    try {
+      const data = JSON.parse($(el).contents().text());
+      const candidates = Array.isArray(data) ? data : [data];
+      for (const c of candidates) {
+        const t = c?.["@type"];
+        if (
+          (t === "Organization" || t === "LocalBusiness" || (Array.isArray(t) && t.includes("Organization"))) &&
+          typeof c.name === "string" &&
+          isPlausibleCompanyName(c.name)
+        ) {
+          jsonLdName = c.name.trim();
+          return false;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return undefined;
+  });
+  if (jsonLdName) return jsonLdName;
+
+  // 3. Anchor pattern: "Anbieter:" / "Verantwortlich:" / "Firma:".
+  const anchors = ["Anbieter:", "Betreiber:", "Verantwortlich:", "Verantwortlicher:", "Firma:", "Inhaber:"];
+  for (const a of anchors) {
+    const idx = text.indexOf(a);
+    if (idx >= 0) {
+      const tail = text.slice(idx + a.length, idx + a.length + 200);
+      const m = tail.match(/([A-ZÄÖÜ][\w&.\-äöüßéèà ]{2,80}?(?:GmbH|AG|UG|GbR|KG|OHG|e\.K\.|e\.V\.|Co\. KG|GmbH & Co\. KG))/);
+      if (m?.[1] && isPlausibleCompanyName(m[1])) return m[1].trim();
+    }
+  }
+
+  // 4. Last fallback: first "Name + Rechtsform" occurrence in the body.
+  const m2 = text.match(/([A-ZÄÖÜ][\wäöüß&.\-éèà ]{2,80}?)\s+(GmbH|AG|UG|GbR|KG|OHG|e\.K\.|e\.V\.|Co\. KG|GmbH & Co\. KG)\b/);
+  if (m2?.[0] && isPlausibleCompanyName(m2[0])) return m2[0].trim();
   return undefined;
+}
+
+function isPlausibleCompanyName(s: string): boolean {
+  if (!s) return false;
+  const t = s.trim();
+  if (t.length < 3 || t.length > 80) return false;
+  const lower = t.toLowerCase();
+  for (const bad of NAME_BLACKLIST_PHRASES) {
+    if (lower.startsWith(bad) || lower.includes(` ${bad} `)) return false;
+  }
+  // Reject if it looks like an article/page title.
+  if (/[“”„"`'!?]/.test(t)) return false;
+  if (/\d{2,}\s*[xX×]\s*\d{2,}/.test(t)) return false; // "128x64" → product spec
+  if (/zoll|inch|pixel|modul|display/i.test(t) && !/gmbh|ag|kg|gbr|ug/i.test(t)) return false;
+  return true;
 }
 
 function extractPostalAddress(text: string, zipCityMatch?: string): string | undefined {

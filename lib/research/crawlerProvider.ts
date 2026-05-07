@@ -65,7 +65,16 @@ function toDiscoveredCompany(
   site: NonNullable<Awaited<ReturnType<typeof crawlSite>>>,
 ): DiscoveredCompany | null {
   const fields = site.fields;
-  const fallbackName = source.first.title.split(/[—–|·:]/)[0].trim();
+  // Robust fallback: pretty domain (motrona.com → "motrona") if both the
+  // imprint parser and the page title fail to give us a clean name.
+  const titleHead = source.first.title.split(/[—–|·:]/)[0].trim();
+  const isJunkyTitle =
+    !titleHead ||
+    titleHead.length > 70 ||
+    /copyright|privacy|impressum|kontakt|haftungsausschluss|datenschutz/i.test(titleHead) ||
+    /zoll|inch|pixel|display|modul|ssd|i2c|spi/i.test(titleHead);
+  const domainFallback = source.domain.replace(/\.(de|com|at|ch|eu|net|org|io|shop|store|app|info)$/i, "");
+  const fallbackName = isJunkyTitle ? domainFallback : titleHead;
 
   // Need at least one signal of contact-ability — otherwise this is noise.
   const hasSignal =
