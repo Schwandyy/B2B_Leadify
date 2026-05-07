@@ -1,0 +1,382 @@
+// Product2Lead AI — Prisma schema
+// Multi-tenant via Organization. Public-only B2B contact data, with audit trail.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Identity & Tenancy ----------
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users         User[]
+  products      Product[]
+  searchRuns    SearchRun[]
+  leads         Lead[]
+  outreach      OutreachMessage[]
+  activities    Activity[]
+  notes         Note[]
+  tags          Tag[]
+  optOuts       OptOutRequest[]
+  usageLogs     UsageLog[]
+  subscription  SubscriptionPlan?
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  passwordHash   String
+  name           String?
+  role           Role         @default(MEMBER)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  products    Product[]
+  searchRuns  SearchRun[]
+  activities  Activity[]
+  notes       Note[]
+
+  @@index([organizationId])
+}
+
+// ---------- Product ----------
+
+enum TargetCustomerType {
+  RESELLER
+  MANUFACTURER
+  ENTERPRISE
+  DISTRIBUTOR
+  RETAILER
+  EDUCATION
+  PUBLIC_SECTOR
+  SERVICE_PROVIDER
+  AGENCY
+  PARTNER
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ownerId         String
+  owner           User     @relation(fields: [ownerId], references: [id])
+
+  name            String
+  description     String   @db.Text
+  productUrl      String?
+  category        String?
+  priceRangeMin   Int?
+  priceRangeMax   Int?
+  currency        String   @default("EUR")
+  targetRegion    String?  // "DE", "DACH", "EU", "WORLD"
+  targetCustomerTypes TargetCustomerType[]
+  keywords        String[]
+  exclusions      String[]
+  attachmentPath  String?  // local path for MVP, S3 key later
+  attachmentMime  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  analysis   ProductAnalysis?
+  searchRuns SearchRun[]
+  leads      Lead[]
+
+  @@index([organizationId])
+}
+
+model ProductAnalysis {
+  id        String   @id @default(cuid())
+  productId String   @unique
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  shortDescription   String  @db.Text
+  valueProposition   String  @db.Text
+  problemsSolved     String[]
+  relevantIndustries String[]
+  buyerRoles         String[]
+  companyTypes       String[]
+  searchTerms        String[]
+  competitorOverlap  String[]
+  pitchArguments     String[]
+  objections         String[]
+  searchStrategy     String  @db.Text
+
+  rawJson   Json
+  model     String?  // which AI model generated it
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ---------- Search / Research ----------
+
+enum SearchStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model SearchRun {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  triggeredById  String
+  triggeredBy    User     @relation(fields: [triggeredById], references: [id])
+
+  status         SearchStatus @default(QUEUED)
+  totalLeads     Int      @default(0)
+  newLeads       Int      @default(0)
+  errorMessage   String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime @default(now())
+
+  queries SearchQuery[]
+  leads   Lead[]
+
+  @@index([organizationId])
+  @@index([productId])
+}
+
+model SearchQuery {
+  id          String    @id @default(cuid())
+  searchRunId String
+  searchRun   SearchRun @relation(fields: [searchRunId], references: [id], onDelete: Cascade)
+  query       String
+  intent      String?
+  resultsCount Int      @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([searchRunId])
+}
+
+// ---------- Leads ----------
+
+enum LeadStatus {
+  NEW
+  REVIEWED
+  RELEVANT
+  CONTACTED
+  REPLIED
+  MEETING_BOOKED
+  OFFER_SENT
+  WON
+  LOST
+  ARCHIVED
+}
+
+enum DataQuality {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model Lead {
+  id              String   @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  searchRunId     String?
+  searchRun       SearchRun? @relation(fields: [searchRunId], references: [id], onDelete: SetNull)
+
+  companyName     String
+  website         String?
+  industry        String?
+  city            String?
+  country         String?
+  description     String?  @db.Text
+
+  relevanceReason String?  @db.Text
+  needSignals     String[]
+  productsFound   String[]
+
+  contactEmail    String?
+  contactPhone    String?
+  contactPageUrl  String?
+  imprintUrl      String?
+  contactPerson   String?
+  contactRole     String?
+
+  score           Int      @default(0)
+  scoreBreakdown  Json?
+  dataQuality     DataQuality @default(MEDIUM)
+  status          LeadStatus @default(NEW)
+
+  // Dedup key (lower-cased canonical domain)
+  dedupKey        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sources    LeadSource[]
+  outreach   OutreachMessage[]
+  notes      Note[]
+  activities Activity[]
+  tags       LeadTag[]
+
+  @@index([organizationId])
+  @@index([productId])
+  @@index([status])
+  @@index([dedupKey])
+  @@unique([organizationId, productId, dedupKey])
+}
+
+model LeadSource {
+  id      String @id @default(cuid())
+  leadId  String
+  lead    Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  url     String
+  kind    String // "website" | "imprint" | "directory" | "press" | etc.
+  excerpt String? @db.Text
+  fetchedAt DateTime @default(now())
+
+  @@index([leadId])
+}
+
+// ---------- Outreach ----------
+
+enum OutreachKind {
+  EMAIL
+  LINKEDIN
+  FOLLOWUP
+  PHONE_SCRIPT
+}
+
+enum OutreachStatus {
+  DRAFT
+  APPROVED
+  SENT
+}
+
+model OutreachMessage {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  leadId         String
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  kind           OutreachKind
+  status         OutreachStatus @default(DRAFT)
+
+  subject        String?
+  body           String   @db.Text
+  rawJson        Json?
+  model          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([leadId])
+}
+
+// ---------- CRM helpers ----------
+
+model Activity {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  leadId         String
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id])
+  kind           String   // "status_change" | "note" | "email_drafted" | etc.
+  message        String   @db.Text
+  meta           Json?
+  createdAt      DateTime @default(now())
+
+  @@index([leadId])
+}
+
+model Note {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  leadId         String
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User     @relation(fields: [authorId], references: [id])
+  body           String   @db.Text
+  createdAt      DateTime @default(now())
+
+  @@index([leadId])
+}
+
+model Tag {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  color          String?
+  leads          LeadTag[]
+
+  @@unique([organizationId, name])
+}
+
+model LeadTag {
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  tagId  String
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([leadId, tagId])
+}
+
+// ---------- Compliance / SaaS ----------
+
+model OptOutRequest {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String?
+  domain         String?
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([email])
+  @@index([domain])
+}
+
+model SubscriptionPlan {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tier           String   @default("free") // "free" | "pro" | "enterprise"
+  monthlyLeadLimit Int    @default(100)
+  monthlyAnalysisLimit Int @default(20)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model UsageLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  kind           String   // "ai_analysis" | "search_run" | "outreach_generation"
+  count          Int      @default(1)
+  meta           Json?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([kind])
+}
