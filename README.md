@@ -11,7 +11,7 @@ B2B Lead Intelligence — aus einem Produkt automatisch passende Geschäftskunde
 - **DB / ORM:** PostgreSQL + Prisma
 - **Auth:** Eigene Lösung (signed JWT cookie via `jose`, bcrypt für Passwörter, Multi-Tenant via `Organization`)
 - **AI:** Adapter-Pattern für `mock` (default), `openai` und `anthropic`
-- **Research:** Adapter-Pattern für `mock` (default). Real-Provider sind später ohne UI-Änderung anschließbar.
+- **Research:** Adapter-Pattern. `mock` (Default — fiktive Demo-Firmen) oder `crawler` (DuckDuckGo HTML-Suche + eigener Impressum-Crawler, kostenlos, ohne API-Key, DSGVO-orientiert).
 
 ## Setup
 
@@ -90,8 +90,14 @@ proxy.ts                            Auth-Routing (Next 16 nennt es proxy statt m
 - `outreachService.ts` generiert E-Mail / LinkedIn / Follow-up / Telefon-Leitfaden — immer als `DRAFT`.
 
 ### Research-Engine (`lib/research/`)
-- `companyDiscovery.ts` selektiert den aktiven Provider (aktuell nur Mock).
-- `mockProvider.ts` liefert realistische Beispielfirmen mit Quellen/Kontakten.
+- `companyDiscovery.ts` selektiert den aktiven Provider (`mock` oder `crawler`).
+- `mockProvider.ts` liefert 12 fiktive Beispielfirmen für Demo-/Lokal-Modus.
+- `crawlerProvider.ts` führt echte Recherche aus (DDG-Suche → Impressum-Parser).
+- `search/duckduckgo.ts` postet die Query gegen `html.duckduckgo.com`.
+- `crawler/siteCrawler.ts` findet Impressum-/Kontakt-Links auf der Homepage.
+- `crawler/imprintParser.ts` extrahiert E-Mails (nur generische Rollen-Mailboxen!), Telefon, Adresse, Firma.
+- `crawler/robots.ts` cached + respektiert robots.txt für jede Crawler-Domain.
+- `crawler/rateLimiter.ts` throttelt 1 Req/Sec pro Host + globalen Spread.
 - `queryGeneration.ts` erzeugt Suchqueries (über AI mit deterministischem Fallback).
 - `dedup.ts` definiert den kanonischen Dedup-Key (eTLD+1 oder normalisierter Firmenname).
 - `leadScoring.ts` berechnet einen transparenten 0–100-Score mit Begründung und Datenqualitätslabel.
@@ -101,12 +107,29 @@ proxy.ts                            Auth-Routing (Next 16 nennt es proxy statt m
 - `lib/auth/session.ts` schreibt/liest ein signiertes JWT-Cookie (`HS256`, 30 Tage, `httpOnly`, `lax`).
 - `proxy.ts` (Next 16) leitet unauthentifizierte Anfragen zur `/login` und blockt eingeloggte Nutzer aus den Auth-Routen.
 
+## Echte Recherche aktivieren
+
+Setze in der `.env`:
+
+```
+RESEARCH_PROVIDER="crawler"
+```
+
+Beim nächsten Suchlauf liefert der eigene Crawler echte deutsche B2B-Firmen
+mit ihren öffentlichen Impressum- und Kontaktseiten. Standardmäßig wird nach
+generischen Rollen-Mailboxen (info@, vertrieb@, kontakt@ …) gefiltert; persönliche
+E-Mails (vorname.nachname@) werden gezielt verworfen.
+
+Polite-By-Default: 1 Request/Sekunde pro Host, robots.txt wird respektiert,
+Timeout 8 Sekunden, max. 1.5 MB pro Seite. Der UI-Banner kennzeichnet den
+Modus dauerhaft (gelb=Mock, grün=Crawler).
+
 ## Roadmap (kurz)
 
-1. Real-Provider für Discovery (Bing/Brave Search, Google CSE, Crawler) in `companyDiscovery.ts` als zusätzlicher Adapter.
-2. Migrationen statt `db push`, sobald der Schema-Stand stabil ist.
-3. S3-/Object-Storage für Uploads (heute lokal in `/public/uploads`).
-4. CRM-Pipeline-Board (Kanban) zusätzlich zur Tabelle.
-5. Tests (vitest / playwright) für die kritischen Server Actions.
+1. Migrationen statt `db push`, sobald der Schema-Stand stabil ist.
+2. S3-/Object-Storage für Uploads (heute lokal in `/public/uploads`).
+3. CRM-Pipeline-Board (Kanban) zusätzlich zur Tabelle.
+4. Tests (vitest / playwright) für die kritischen Server Actions.
+5. Branchenklassifikation der Crawler-Funde (heute leer, da nicht zuverlässig aus Impressum ableitbar).
 
 Siehe `DEVELOPMENT_NOTES.md` für Architekturentscheidungen und Annahmen.
