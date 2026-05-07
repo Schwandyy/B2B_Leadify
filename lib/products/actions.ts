@@ -10,6 +10,7 @@ import { prisma } from "@/lib/db/prisma";
 import { requireUser } from "@/lib/auth/session";
 import { analyzeProduct } from "@/lib/ai/productAnalysisService";
 import { runResearch } from "@/lib/research/researchService";
+import { enrichProduct } from "@/lib/import/productEnrichment";
 import type { TargetCustomerType } from "@prisma/client";
 
 const TARGET_TYPES = [
@@ -153,6 +154,38 @@ export async function analyzeProductAction(productId: string) {
   if (!product) throw new Error("Product not found");
   await analyzeProduct(product.id);
   revalidatePath(`/products/${productId}`);
+}
+
+export type EnrichResult =
+  | { ok: true; source: "amazon" | "az-delivery"; bytes: number; tried: string[] }
+  | { ok: false; error: string; tried: string[] };
+
+export async function enrichProductAction(productId: string): Promise<EnrichResult> {
+  const user = await requireUser();
+  const product = await prisma.product.findFirst({
+    where: { id: productId, organizationId: user.organizationId },
+    select: { id: true, name: true, productUrl: true },
+  });
+  if (!product) throw new Error("Product not found");
+
+  const result = await enrichProduct({ name: product.name, productUrl: product.productUrl });
+  if (!result.ok) return { ok: false, error: result.reason, tried: result.tried };
+
+  await prisma.product.update({
+    where: { id: product.id },
+    data: { description: result.snapshot.text },
+  });
+  // Existing AI analysis is now stale.
+  await prisma.productAnalysis.deleteMany({ where: { productId: product.id } });
+
+  revalidatePath(`/products/${productId}`);
+  revalidatePath("/products");
+  return {
+    ok: true,
+    source: result.snapshot.source,
+    bytes: result.snapshot.text.length,
+    tried: result.tried,
+  };
 }
 
 export async function startSearchAction(productId: string) {

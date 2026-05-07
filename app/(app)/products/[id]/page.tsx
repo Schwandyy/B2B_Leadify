@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScoreBadge } from "@/components/ui/score";
 import { EmptyState } from "@/components/ui/empty";
-import { AnalyzeButton, StartSearchButton } from "@/components/products/product-actions";
+import { AnalyzeButton, StartSearchButton, EnrichButton } from "@/components/products/product-actions";
 import { formatDateShort, relativeFromNow } from "@/lib/utils/format";
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -51,6 +51,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <EnrichButton productId={product.id} />
           <AnalyzeButton productId={product.id} hasAnalysis={Boolean(product.analysis)} />
           <StartSearchButton productId={product.id} />
         </div>

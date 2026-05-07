@@ -1,8 +1,13 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { analyzeProductAction, startSearchAction } from "@/lib/products/actions";
+import {
+  analyzeProductAction,
+  startSearchAction,
+  enrichProductAction,
+  type EnrichResult,
+} from "@/lib/products/actions";
 import { Button } from "@/components/ui/button";
 
 export function AnalyzeButton({ productId, hasAnalysis }: { productId: string; hasAnalysis: boolean }) {
@@ -39,5 +44,37 @@ export function StartSearchButton({ productId, disabled }: { productId: string; 
     >
       {pending ? "Suchlauf läuft …" : "Suchlauf starten"}
     </Button>
+  );
+}
+
+export function EnrichButton({ productId }: { productId: string }) {
+  const [pending, start] = useTransition();
+  const [last, setLast] = useState<EnrichResult | null>(null);
+  const router = useRouter();
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        variant="secondary"
+        disabled={pending}
+        onClick={() =>
+          start(async () => {
+            const r = await enrichProductAction(productId);
+            setLast(r);
+            if (r.ok) router.refresh();
+          })
+        }
+      >
+        {pending ? "Lade Beschreibung …" : "Beschreibung neu laden"}
+      </Button>
+      {last ? (
+        last.ok ? (
+          <span className="text-xs text-emerald-700">
+            ✓ aus {last.source} ({last.bytes} Zeichen) — KI-Analyse zurückgesetzt
+          </span>
+        ) : (
+          <span className="text-xs text-rose-700">{last.error}</span>
+        )
+      ) : null}
+    </div>
   );
 }
