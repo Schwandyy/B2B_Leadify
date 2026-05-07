@@ -22,6 +22,11 @@ export async function POST(request: Request) {
   const mappingRaw = formData.get("mapping");
   const enrichLinks = formData.get("enrichLinks") === "true";
   const autoAnalyze = formData.get("autoAnalyze") === "true";
+  const headerRowRaw = formData.get("headerRow");
+  const gid = typeof formData.get("gid") === "string" ? String(formData.get("gid")).trim() : "";
+
+  const headerRowParsed = headerRowRaw ? parseInt(String(headerRowRaw), 10) : 0;
+  const headerRow = Number.isFinite(headerRowParsed) && headerRowParsed > 0 ? headerRowParsed : undefined;
 
   let mapping: ColumnMapping;
   try {
@@ -39,9 +44,9 @@ export async function POST(request: Request) {
   let parseResult;
   try {
     if (file instanceof File && file.size > 0) {
-      parseResult = await parseUpload(file);
+      parseResult = await parseUpload(file, { headerRow });
     } else if (typeof sheetUrl === "string" && sheetUrl.trim()) {
-      parseResult = await parseGoogleSheet(sheetUrl.trim());
+      parseResult = await parseGoogleSheet(sheetUrl.trim(), { headerRow, gid: gid || undefined });
     } else {
       return NextResponse.json({ error: "Datei oder Google-Sheets-URL fehlt." }, { status: 400 });
     }

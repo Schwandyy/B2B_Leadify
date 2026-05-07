@@ -3,55 +3,75 @@ import type { ImportRow, ParseResult } from "./types";
 
 const MAX_ROWS = 2000;
 
-/**
- * Parse an uploaded file (xlsx or csv). xlsx-lib autodetects, so the same
- * code path handles both. Returns the first sheet only.
- */
-export async function parseUpload(file: File): Promise<ParseResult> {
-  const buf = Buffer.from(await file.arrayBuffer());
-  const isCsv =
-    file.name.toLowerCase().endsWith(".csv") ||
-    file.type === "text/csv" ||
-    file.type === "application/csv";
-  const workbook = XLSX.read(buf, { type: "buffer", cellDates: true });
-  return workbookToResult(workbook, isCsv ? "csv" : "excel");
-}
-
 const GOOGLE_FETCH_HEADERS: HeadersInit = {
-  // Google's edge serves a different response for "browser-like" agents:
-  // server-side fetch without UA gets bounced to a sign-in page even for
-  // link-shared sheets. A real-browser-shaped UA fixes that.
+  // Server-side fetch ohne UA wird von Google teilweise auf eine
+  // Login-Seite umgeleitet — auch bei "Mit Link freigeben". Browser-UA fixt das.
   "User-Agent":
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
   Accept: "text/csv, text/plain, */*",
   "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
 };
 
-type SheetIds = { spreadsheetId: string; gid: string };
+export type ParseOptions = {
+  /** 1-based: which row contains the column headers. Default 1. */
+  headerRow?: number;
+  /** Override the gid for Google Sheets. */
+  gid?: string;
+};
 
 /**
- * Fetch a public Google Sheet. Sharing must be at least "Viewable with the link".
+ * Parse an uploaded file (xlsx or csv).
+ */
+export async function parseUpload(file: File, options: ParseOptions = {}): Promise<ParseResult> {
+  const buf = Buffer.from(await file.arrayBuffer());
+  const isCsv =
+    file.name.toLowerCase().endsWith(".csv") ||
+    file.type === "text/csv" ||
+    file.type === "application/csv";
+  const workbook = XLSX.read(buf, { type: "buffer", cellDates: true });
+  return workbookToResult(workbook, isCsv ? "csv" : "excel", options);
+}
+
+type SheetIds = { spreadsheetId: string; gid: string };
+
+export function parseSheetIds(url: string): SheetIds | null {
+  try {
+    const u = new URL(url.trim());
+    if (!u.hostname.endsWith("docs.google.com")) return null;
+    const m = u.pathname.match(/\/spreadsheets\/d\/([^/]+)/);
+    if (!m) return null;
+    const id = m[1];
+    const gidFromHash = new URLSearchParams(u.hash.replace(/^#/, "")).get("gid");
+    const gidFromQuery = u.searchParams.get("gid");
+    const gid = gidFromQuery ?? gidFromHash ?? "0";
+    return { spreadsheetId: id, gid };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch a public Google Sheet. Sharing must be at least "Anyone with the link can view".
  *
  * Google has multiple CSV endpoints with different quirks:
- *  - /export?format=csv      works when "Anyone with the link can view"
- *  - /gviz/tq?tqx=out:csv    same access rules, often more permissive about
- *                            UA, gives clearer errors
- *  - /pub?output=csv         only works when "Publish to web" is enabled
+ *  - /export?format=csv      bevorzugter Pfad
+ *  - /gviz/tq?tqx=out:csv    Fallback, gibt klarere Fehler
+ *  - /pub?output=csv         braucht "Im Web veröffentlicht"
  *
- * We try (1), then (2) — if both fail with HTML, the user almost certainly
- * needs "Anyone with the link" instead of restricted sharing.
+ * Wenn beide bevorzugten Pfade HTML zurückliefern, ist die Freigabe nicht offen genug.
  */
-export async function parseGoogleSheet(url: string): Promise<ParseResult> {
+export async function parseGoogleSheet(url: string, options: ParseOptions = {}): Promise<ParseResult> {
   const ids = parseSheetIds(url);
   if (!ids) {
     throw new Error(
       "Konnte die Google-Sheets-URL nicht lesen. Bitte die normale Tabellen-URL einfügen (https://docs.google.com/spreadsheets/d/...).",
     );
   }
+  const gid = options.gid?.trim() || ids.gid;
 
   const attempts = [
-    `https://docs.google.com/spreadsheets/d/${ids.spreadsheetId}/export?format=csv&gid=${ids.gid}`,
-    `https://docs.google.com/spreadsheets/d/${ids.spreadsheetId}/gviz/tq?tqx=out:csv&gid=${ids.gid}`,
+    `https://docs.google.com/spreadsheets/d/${ids.spreadsheetId}/export?format=csv&gid=${gid}`,
+    `https://docs.google.com/spreadsheets/d/${ids.spreadsheetId}/gviz/tq?tqx=out:csv&gid=${gid}`,
   ];
 
   let lastError = "";
@@ -59,7 +79,9 @@ export async function parseGoogleSheet(url: string): Promise<ParseResult> {
     const csv = await tryFetchCsv(endpoint);
     if (csv.kind === "ok") {
       const workbook = XLSX.read(csv.body, { type: "string" });
-      return workbookToResult(workbook, "google-sheets");
+      const result = workbookToResult(workbook, "google-sheets", options);
+      result.warnings.unshift(`Geladen: gid=${gid} · ${csv.body.split(/\r?\n/).length} Roh-Zeilen aus Google.`);
+      return result;
     }
     lastError = csv.error;
   }
@@ -84,8 +106,6 @@ async function tryFetchCsv(endpoint: string): Promise<FetchResult> {
   }
   const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
   const body = await res.text();
-  // Anything HTML-ish means Google didn't actually deliver the CSV: usually
-  // an interstitial sign-in page, an "AccessDenied" or rate-limit page.
   const looksLikeHtml = contentType.includes("html") || /^\s*</.test(body);
   if (looksLikeHtml) {
     return { kind: "fail", error: classifyHtml(body) };
@@ -107,74 +127,107 @@ function classifyHtml(body: string): string {
   return "Google liefert HTML statt CSV (vermutlich Berechtigungsproblem).";
 }
 
-function parseSheetIds(url: string): SheetIds | null {
-  try {
-    const u = new URL(url.trim());
-    if (!u.hostname.endsWith("docs.google.com")) return null;
-    const m = u.pathname.match(/\/spreadsheets\/d\/([^/]+)/);
-    if (!m) return null;
-    const id = m[1];
-    const gidFromHash = new URLSearchParams(u.hash.replace(/^#/, "")).get("gid");
-    const gidFromQuery = u.searchParams.get("gid");
-    const gid = gidFromQuery ?? gidFromHash ?? "0";
-    return { spreadsheetId: id, gid };
-  } catch {
-    return null;
-  }
-}
-
-function workbookToResult(workbook: XLSX.WorkBook, source: ParseResult["source"]): ParseResult {
+function workbookToResult(
+  workbook: XLSX.WorkBook,
+  source: ParseResult["source"],
+  options: ParseOptions,
+): ParseResult {
   const sheetName = workbook.SheetNames[0];
+  const warnings: string[] = [];
   if (!sheetName) {
     return { headers: [], rows: [], source, warnings: ["Keine Tabelle in der Datei gefunden."] };
   }
   const sheet = workbook.Sheets[sheetName];
-  const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+
+  // Read everything as a 2D array first so we can pick any header row.
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
     raw: false,
     defval: "",
+    blankrows: false,
     rawNumbers: false,
   });
-  const warnings: string[] = [];
-  if (json.length > MAX_ROWS) {
+
+  if (matrix.length === 0) {
+    return { headers: [], rows: [], source, sheetName, warnings: ["Tabelle ist leer."] };
+  }
+
+  // Choose header row (1-based). Fallback: auto-detect — pick the first row
+  // whose non-empty count is >= max(2, half the widest row).
+  const requested = options.headerRow ?? 0;
+  let headerRowIndex = requested > 0 ? requested - 1 : autoDetectHeaderRow(matrix);
+  if (headerRowIndex >= matrix.length) {
+    warnings.push(
+      `Header-Zeile ${headerRowIndex + 1} liegt jenseits der Tabelle (${matrix.length} Zeilen). Erste Zeile wird genutzt.`,
+    );
+    headerRowIndex = 0;
+  }
+  if (headerRowIndex !== 0 && requested === 0) {
+    warnings.push(`Header automatisch in Zeile ${headerRowIndex + 1} erkannt.`);
+  }
+
+  const rawHeaders = (matrix[headerRowIndex] ?? []).map((v, i) => stringValue(v) || `Spalte ${i + 1}`);
+  const headers = ensureUniqueHeaders(rawHeaders);
+
+  const dataRows = matrix.slice(headerRowIndex + 1);
+  if (dataRows.length > MAX_ROWS) {
     warnings.push(`Mehr als ${MAX_ROWS} Zeilen — der Import begrenzt auf die ersten ${MAX_ROWS}.`);
   }
-  const limited = json.slice(0, MAX_ROWS);
-  const headers = collectHeaders(limited);
-  const rows: ImportRow[] = limited
-    .map((row) => normaliseRow(row, headers))
+
+  const rows: ImportRow[] = dataRows
+    .slice(0, MAX_ROWS)
+    .map((row) => rowToObject(row, headers))
     .filter((row) => Object.values(row).some((v) => v && v.length));
+
   return { headers, rows, source, sheetName, warnings };
 }
 
-function collectHeaders(rows: Array<Record<string, unknown>>): string[] {
-  const headers: string[] = [];
-  const seen = new Set<string>();
-  for (const row of rows) {
-    for (const key of Object.keys(row)) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        headers.push(key);
-      }
+function autoDetectHeaderRow(matrix: unknown[][]): number {
+  // Take a look at the first 5 rows and pick the first one that looks
+  // like real headers (mostly non-empty, mostly short text).
+  const limit = Math.min(5, matrix.length);
+  let bestIdx = 0;
+  let bestScore = -1;
+  for (let i = 0; i < limit; i++) {
+    const row = matrix[i] ?? [];
+    let nonEmpty = 0;
+    let textLike = 0;
+    for (const cell of row) {
+      const s = stringValue(cell);
+      if (s) nonEmpty += 1;
+      if (s && s.length <= 60 && /[A-Za-zÄÖÜäöüß]/.test(s)) textLike += 1;
+    }
+    const score = textLike + nonEmpty * 0.5;
+    if (score > bestScore && nonEmpty >= 2) {
+      bestScore = score;
+      bestIdx = i;
     }
   }
-  return headers;
+  return bestIdx;
 }
 
-function normaliseRow(row: Record<string, unknown>, headers: string[]): ImportRow {
+function ensureUniqueHeaders(headers: string[]): string[] {
+  const seen = new Map<string, number>();
+  return headers.map((h) => {
+    const base = h || "Spalte";
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    return count === 0 ? base : `${base} (${count + 1})`;
+  });
+}
+
+function rowToObject(row: unknown[], headers: string[]): ImportRow {
   const out: ImportRow = {};
-  for (const h of headers) {
-    const v = row[h];
-    if (v === null || v === undefined) {
-      out[h] = "";
-    } else if (typeof v === "string") {
-      out[h] = v.trim();
-    } else if (typeof v === "number" || typeof v === "boolean") {
-      out[h] = String(v);
-    } else if (v instanceof Date) {
-      out[h] = v.toISOString();
-    } else {
-      out[h] = String(v).trim();
-    }
+  for (let i = 0; i < headers.length; i++) {
+    out[headers[i]] = stringValue(row[i]);
   }
   return out;
+}
+
+function stringValue(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v.trim();
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (v instanceof Date) return v.toISOString();
+  return String(v).trim();
 }

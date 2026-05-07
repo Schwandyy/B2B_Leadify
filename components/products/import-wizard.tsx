@@ -30,6 +30,7 @@ type Preview = {
   source: "excel" | "csv" | "google-sheets";
   sheetName?: string;
   warnings: string[];
+  gid?: string;
 };
 
 type ImportItemResult = {
@@ -68,6 +69,8 @@ export function ImportWizard() {
   const [mapping, setMapping] = useState<Mapping>({});
   const [enrichLinks, setEnrichLinks] = useState(true);
   const [autoAnalyze, setAutoAnalyze] = useState(false);
+  const [headerRow, setHeaderRow] = useState<string>("");
+  const [gid, setGid] = useState<string>("");
   const [previewing, setPreviewing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,11 +85,14 @@ export function ImportWizard() {
       const fd = new FormData();
       if (file) fd.append("file", file);
       if (sheetUrl) fd.append("sheetUrl", sheetUrl);
+      if (headerRow) fd.append("headerRow", headerRow);
+      if (gid) fd.append("gid", gid);
       const res = await fetch("/api/import/preview", { method: "POST", body: fd });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Preview fehlgeschlagen.");
       setPreview(json as Preview);
       setMapping(json.mapping ?? {});
+      if (!gid && json.gid) setGid(json.gid);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Preview fehlgeschlagen.");
     } finally {
@@ -107,6 +113,8 @@ export function ImportWizard() {
       const fd = new FormData();
       if (file) fd.append("file", file);
       if (sheetUrl) fd.append("sheetUrl", sheetUrl);
+      if (headerRow) fd.append("headerRow", headerRow);
+      if (gid) fd.append("gid", gid);
       fd.append("mapping", JSON.stringify(mapping));
       fd.append("enrichLinks", String(enrichLinks));
       fd.append("autoAnalyze", String(autoAnalyze));
@@ -127,6 +135,8 @@ export function ImportWizard() {
     setSheetUrl("");
     setPreview(null);
     setMapping({});
+    setHeaderRow("");
+    setGid("");
     setResult(null);
     setError(null);
   }
@@ -175,6 +185,36 @@ export function ImportWizard() {
                 <FieldHint>Freigabe muss &laquo;Jeder mit dem Link&raquo; sein.</FieldHint>
               </div>
             </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <Label htmlFor="headerRow">Header in Zeile</Label>
+                <Input
+                  id="headerRow"
+                  type="number"
+                  min={1}
+                  max={50}
+                  placeholder="auto"
+                  value={headerRow}
+                  onChange={(e) => setHeaderRow(e.target.value)}
+                />
+                <FieldHint>Leer lassen = automatisch erkennen.</FieldHint>
+              </div>
+              <div className="sm:col-span-2">
+                <Label htmlFor="gid">Sheet-Tab (gid)</Label>
+                <Input
+                  id="gid"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="0 (erster Tab)"
+                  value={gid}
+                  onChange={(e) => setGid(e.target.value)}
+                  disabled={!sheetUrl}
+                />
+                <FieldHint>
+                  Nur für Google-Sheets relevant. Steht in der URL nach <code>#gid=</code>. Ist die URL ohne gid eingefügt, wird der erste Tab geladen.
+                </FieldHint>
+              </div>
+            </div>
             {error ? (
               <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                 {error}
@@ -201,12 +241,24 @@ export function ImportWizard() {
             <CardSubtitle>
               {preview.rowCount} Datensätze · {preview.headers.length} Spalten · Quelle: {preview.source}
               {preview.sheetName ? ` · Sheet: ${preview.sheetName}` : ""}
+              {preview.gid ? ` · gid: ${preview.gid}` : ""}
             </CardSubtitle>
           </CardHeader>
           <CardBody className="space-y-5">
             {preview.warnings.length ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 {preview.warnings.map((w) => <div key={w}>{w}</div>)}
+              </div>
+            ) : null}
+
+            {preview.rowCount <= 1 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                <div className="font-medium">Nur {preview.rowCount} Datenzeile gefunden.</div>
+                <ul className="mt-1 list-disc pl-5 text-xs">
+                  <li>Hat dein Sheet mehrere Tabs? Trage die <code>gid</code> oben ein und „Vorschau aktualisieren".</li>
+                  <li>Liegt der Header nicht in Zeile 1? Setze oben die Zeile (z. B. 2 oder 3).</li>
+                  <li>Sind die Header verbundene Zellen? Aktuell wird die Header-Zeile als Liste benutzt.</li>
+                </ul>
               </div>
             ) : null}
 
