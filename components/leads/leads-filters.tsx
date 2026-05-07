@@ -75,8 +75,10 @@ export function LeadsFilters({ products }: { products: Array<{ id: string; name:
         <Label htmlFor="hasContact">Kontakt</Label>
         <Select id="hasContact" name="hasContact" defaultValue={sp.get("hasContact") ?? ""}>
           <option value="">Egal</option>
-          <option value="yes">vorhanden</option>
-          <option value="no">fehlt</option>
+          <option value="email">E-Mail vorhanden</option>
+          <option value="phone">Telefon vorhanden</option>
+          <option value="any">Mind. eine Form</option>
+          <option value="none">Keine Kontaktwege</option>
         </Select>
       </div>
       <div className="sm:col-span-6 flex items-center justify-end gap-2">

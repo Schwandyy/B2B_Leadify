@@ -27,6 +27,9 @@ export async function generateOutreach(args: {
     include: { product: true },
   });
   if (!lead) throw new Error("Lead not found");
+  if (args.kind === "PHONE_SCRIPT" && !lead.contactPhone) {
+    throw new Error("Telefon-Leitfaden nicht möglich — Lead hat keine Telefonnummer.");
+  }
 
   const ai = getAIClient();
   const productInput = toAIInput(lead.product);

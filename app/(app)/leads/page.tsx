@@ -44,11 +44,7 @@ export default async function LeadsPage({
     ...(productId ? { productId } : {}),
     ...(status ? { status } : {}),
     ...(typeof minScore === "number" && !Number.isNaN(minScore) ? { score: { gte: minScore } } : {}),
-    ...(hasContact === "yes"
-      ? { OR: [{ contactEmail: { not: null } }, { contactPhone: { not: null } }] }
-      : hasContact === "no"
-        ? { contactEmail: null, contactPhone: null }
-        : {}),
+    ...contactClause(hasContact),
     ...(q
       ? {
           OR: [
@@ -139,7 +135,11 @@ export default async function LeadsPage({
                         {[lead.city, lead.country].filter(Boolean).join(", ") || "—"}
                       </td>
                       <td className="py-2 pr-4 text-slate-600">
-                        {lead.contactEmail || lead.contactPhone || "—"}
+                        <div className="flex flex-col gap-0.5 text-xs">
+                          {lead.contactEmail ? <span className="text-slate-700">{lead.contactEmail}</span> : null}
+                          {lead.contactPhone ? <span className="text-slate-500">{lead.contactPhone}</span> : null}
+                          {!lead.contactEmail && !lead.contactPhone ? <span className="text-slate-400">—</span> : null}
+                        </div>
                       </td>
                       <td className="py-2 pr-4"><Badge variant="muted">{lead.status.toLowerCase()}</Badge></td>
                       <td className="py-2 pr-4 text-slate-600">{lead.product.name}</td>
@@ -174,6 +174,26 @@ export default async function LeadsPage({
       ) : null}
     </div>
   );
+}
+
+function contactClause(value: string | undefined): Prisma.LeadWhereInput {
+  switch (value) {
+    case "email":
+      return { contactEmail: { not: null } };
+    case "phone":
+      return { contactPhone: { not: null } };
+    case "any":
+      return { OR: [{ contactEmail: { not: null } }, { contactPhone: { not: null } }] };
+    case "none":
+      return { contactEmail: null, contactPhone: null };
+    // legacy values from earlier UI versions
+    case "yes":
+      return { OR: [{ contactEmail: { not: null } }, { contactPhone: { not: null } }] };
+    case "no":
+      return { contactEmail: null, contactPhone: null };
+    default:
+      return {};
+  }
 }
 
 function pageHref(sp: Record<string, string | string[] | undefined>, page: number) {

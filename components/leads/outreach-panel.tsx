@@ -7,19 +7,29 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { OutreachKind, OutreachMessage, OutreachStatus } from "@prisma/client";
 
-const KINDS: Array<{ kind: OutreachKind; label: string; hint: string }> = [
+type KindDef = {
+  kind: OutreachKind;
+  label: string;
+  hint: string;
+  /** If true, this kind needs a phone number on the lead. */
+  requiresPhone?: boolean;
+};
+
+const KINDS: KindDef[] = [
   { kind: "EMAIL", label: "E-Mail", hint: "Erstanschreiben" },
   { kind: "LINKEDIN", label: "LinkedIn", hint: "Kurznachricht" },
   { kind: "FOLLOWUP", label: "Follow-Up", hint: "Erinnerung" },
-  { kind: "PHONE_SCRIPT", label: "Telefon", hint: "Gesprächsleitfaden" },
+  { kind: "PHONE_SCRIPT", label: "Telefon", hint: "Gesprächsleitfaden", requiresPhone: true },
 ];
 
 export function OutreachPanel({
   leadId,
   messages,
+  hasPhone,
 }: {
   leadId: string;
   messages: OutreachMessage[];
+  hasPhone: boolean;
 }) {
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -41,18 +51,22 @@ export function OutreachPanel({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
-        {KINDS.map((k) => (
-          <Button
-            key={k.kind}
-            variant="secondary"
-            size="sm"
-            disabled={pending}
-            onClick={() => generate(k.kind)}
-            title={k.hint}
-          >
-            {pending ? "…" : `${k.label} generieren`}
-          </Button>
-        ))}
+        {KINDS.map((k) => {
+          const blocked = k.requiresPhone && !hasPhone;
+          return (
+            <Button
+              key={k.kind}
+              variant="secondary"
+              size="sm"
+              disabled={pending || blocked}
+              onClick={() => generate(k.kind)}
+              title={blocked ? "Keine Telefonnummer für diesen Lead — Telefon-Outreach nicht sinnvoll." : k.hint}
+            >
+              {pending ? "…" : `${k.label} generieren`}
+              {blocked ? " (kein Telefon)" : ""}
+            </Button>
+          );
+        })}
       </div>
 
       {messages.length === 0 ? (

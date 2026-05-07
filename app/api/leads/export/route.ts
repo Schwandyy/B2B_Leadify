@@ -17,6 +17,23 @@ const STATUSES = new Set<LeadStatus>([
   "ARCHIVED",
 ]);
 
+function contactClause(value: string | undefined | null): Prisma.LeadWhereInput {
+  switch (value) {
+    case "email":
+      return { contactEmail: { not: null } };
+    case "phone":
+      return { contactPhone: { not: null } };
+    case "any":
+    case "yes":
+      return { OR: [{ contactEmail: { not: null } }, { contactPhone: { not: null } }] };
+    case "none":
+    case "no":
+      return { contactEmail: null, contactPhone: null };
+    default:
+      return {};
+  }
+}
+
 export async function GET(request: Request) {
   let user;
   try {
@@ -39,11 +56,7 @@ export async function GET(request: Request) {
     ...(productId ? { productId } : {}),
     ...(status ? { status } : {}),
     ...(typeof minScore === "number" && !Number.isNaN(minScore) ? { score: { gte: minScore } } : {}),
-    ...(hasContact === "yes"
-      ? { OR: [{ contactEmail: { not: null } }, { contactPhone: { not: null } }] }
-      : hasContact === "no"
-        ? { contactEmail: null, contactPhone: null }
-        : {}),
+    ...contactClause(hasContact),
     ...(q
       ? {
           OR: [

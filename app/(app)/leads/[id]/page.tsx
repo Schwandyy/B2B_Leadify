@@ -60,6 +60,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <Badge variant={lead.dataQuality === "HIGH" ? "success" : lead.dataQuality === "MEDIUM" ? "info" : "muted"}>
             Datenqualität: {lead.dataQuality.toLowerCase()}
           </Badge>
+          {lead.contactEmail ? <Badge variant="info">E-Mail</Badge> : null}
+          {lead.contactPhone ? (
+            <Badge variant="info">Telefon</Badge>
+          ) : (
+            <Badge variant="muted">kein Telefon</Badge>
+          )}
         </div>
       </div>
 
@@ -144,7 +150,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               </CardSubtitle>
             </CardHeader>
             <CardBody>
-              <OutreachPanel leadId={lead.id} messages={lead.outreach} />
+              <OutreachPanel leadId={lead.id} messages={lead.outreach} hasPhone={Boolean(lead.contactPhone)} />
             </CardBody>
           </Card>
 

@@ -235,9 +235,19 @@ export const mockCompanyDiscovery: CompanyDiscoveryProvider = {
       .map((x) => x.company);
 
     // Always return at least one company so the pipeline has data to work with.
-    if (scored.length === 0) {
-      return POOL.slice(0, Math.min(limit, 3));
-    }
-    return scored;
+    const result = scored.length === 0 ? POOL.slice(0, Math.min(limit, 3)) : scored;
+    // Real public B2B impressums have phone numbers far less often than e-mail
+    // addresses. Strip the phone for ~60% of results so the rest of the app
+    // realistically deals with leads where Cold Calling isn't an option.
+    return result.map((company, idx) => stripPhoneOften(company, idx));
   },
 };
+
+function stripPhoneOften(company: DiscoveredCompany, idx: number): DiscoveredCompany {
+  // Deterministic: every 5th index keeps the phone, the rest don't. Yields
+  // ~20% with-phone, matching what real B2B-website impressums look like.
+  if (idx % 5 === 0) return company;
+  if (!company.contactPhone) return company;
+  const { contactPhone: _drop, ...rest } = company;
+  return rest as DiscoveredCompany;
+}
