@@ -25,7 +25,8 @@ export default async function ProductsPage({
   const sp = await searchParams;
   const user = await requireUser();
   const q = (sp.q as string | undefined)?.trim();
-  const stockFilter = (sp.stock as string | undefined) ?? "all";
+  // Leerer String und "all" werden gleich behandelt (kein Filter aktiv).
+  const stockFilter = ((sp.stock as string | undefined) ?? "").trim() || "all";
   const page = Math.max(1, parseInt((sp.page as string | undefined) ?? "1", 10));
   const view: ProductsView = (sp.view as string | undefined) === "grid" ? "grid" : "list";
   const sortKey = parseSortKey(sp.sort as string | undefined);
@@ -184,6 +185,7 @@ export default async function ProductsPage({
             leads: leadsFilter,
             runs: runsFilter,
             variants: variantsFilter,
+            stock: stockFilter === "all" ? "" : stockFilter,
           }}
           categoryOptions={categoryOptions}
         />
@@ -286,7 +288,14 @@ function ProductsTable({
 }: {
   products: Row[];
   stockBySku: Map<string, number>;
-  filters: { cat: string; ki: string; leads: string; runs: string; variants: string };
+  filters: {
+    cat: string;
+    ki: string;
+    leads: string;
+    runs: string;
+    variants: string;
+    stock: string;
+  };
   categoryOptions: FilterOption[];
 }) {
   const presence: FilterOption[] = [
@@ -298,6 +307,13 @@ function ProductsTable({
     { value: "", label: "Alle" },
     { value: "positive", label: ">0" },
     { value: "zero", label: "0" },
+  ];
+  const stockOptions: FilterOption[] = [
+    { value: "", label: "Alle" },
+    { value: "in_stock", label: ">0" },
+    { value: "low", label: "1–10" },
+    { value: "out", label: "0" },
+    { value: "none", label: "Ohne Daten" },
   ];
   return (
     <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -343,7 +359,7 @@ function ProductsTable({
               <ColumnFilter param="cat" options={categoryOptions} current={filters.cat} />
             </th>
             <th className="px-3 pb-2 pt-1 align-top">
-              <span className="block text-[10px] uppercase tracking-wide text-slate-300">oben</span>
+              <ColumnFilter param="stock" options={stockOptions} current={filters.stock} />
             </th>
             <th className="px-3 pb-2 pt-1 align-top">
               <ColumnFilter param="variants" options={presence} current={filters.variants} />

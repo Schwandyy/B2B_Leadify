@@ -1,53 +1,40 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Input, Select } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-const STOCK_OPTIONS: { value: string; label: string }[] = [
-  { value: "all", label: "Alle Bestände" },
-  { value: "in_stock", label: "Auf Lager (>0)" },
-  { value: "low", label: "Niedriger Bestand (1–10)" },
-  { value: "out", label: "Ausverkauft (0)" },
-  { value: "none", label: "Ohne Bestandsdaten" },
-];
+const RESET_KEEP = new Set(["view"]);
 
 export function ProductsSearch() {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
   const q = sp.get("q") ?? "";
-  const stock = sp.get("stock") ?? "all";
-  const view = sp.get("view") ?? "";
-
-  const buildUrl = (overrides: Record<string, string>) => {
-    const next = new URLSearchParams();
-    const merged: Record<string, string> = { q, stock, view, ...overrides };
-    for (const [k, v] of Object.entries(merged)) {
-      if (!v) continue;
-      if (k === "stock" && v === "all") continue;
-      next.set(k, v);
-    }
-    const qs = next.toString();
-    return `${pathname}${qs ? `?${qs}` : ""}`;
-  };
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
-    router.push(
-      buildUrl({
-        q: String(data.get("q") ?? "").trim(),
-        stock: String(data.get("stock") ?? "all"),
-      }),
-    );
+    const next = new URLSearchParams(sp.toString());
+    const value = String(data.get("q") ?? "").trim();
+    if (value) next.set("q", value);
+    else next.delete("q");
+    next.delete("page");
+    const qs = next.toString();
+    router.push(`${pathname}${qs ? `?${qs}` : ""}`);
   };
 
-  const onStockChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    router.push(buildUrl({ stock: e.target.value }));
+  const onReset = () => {
+    const next = new URLSearchParams();
+    for (const [k, v] of sp.entries()) {
+      if (RESET_KEEP.has(k)) next.set(k, v);
+    }
+    const qs = next.toString();
+    router.push(`${pathname}${qs ? `?${qs}` : ""}`);
   };
 
-  const isFiltered = Boolean(q) || (stock !== "all");
+  // Aktiv: irgendein Filter-Param außer "view" gesetzt.
+  const isFiltered = Array.from(sp.keys()).some((k) => !RESET_KEEP.has(k));
 
   return (
     <form onSubmit={onSubmit} className="flex flex-wrap gap-2">
@@ -57,21 +44,9 @@ export function ProductsSearch() {
         placeholder="Suche nach AZ-Code, Produktname oder Kategorie …"
         className="min-w-64 max-w-xl flex-1"
       />
-      <Select
-        name="stock"
-        defaultValue={stock}
-        onChange={onStockChange}
-        className="w-auto"
-      >
-        {STOCK_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </Select>
       <Button type="submit" variant="secondary">Suchen</Button>
       {isFiltered ? (
-        <Button type="button" variant="ghost" onClick={() => router.push(pathname)}>
+        <Button type="button" variant="ghost" onClick={onReset}>
           Zurücksetzen
         </Button>
       ) : null}
