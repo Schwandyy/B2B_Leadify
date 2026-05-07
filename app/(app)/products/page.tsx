@@ -27,7 +27,10 @@ export default async function ProductsPage() {
             Verwalten Sie die Produkte, für die Leads generiert werden.
           </p>
         </div>
-        <Link href="/products/new"><Button>Neues Produkt</Button></Link>
+        <div className="flex gap-2">
+          <Link href="/products/import"><Button variant="secondary">Bulk-Import</Button></Link>
+          <Link href="/products/new"><Button>Neues Produkt</Button></Link>
+        </div>
       </div>
 
       {products.length === 0 ? (
