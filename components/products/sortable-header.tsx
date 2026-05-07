@@ -56,10 +56,10 @@ export function SortableHeader({ label, sortKey, align = "left", className }: Pr
         aria-hidden
         className={cn(
           "text-[10px] leading-none transition",
-          active ? "opacity-100" : "opacity-0 group-hover:opacity-50",
+          active ? "opacity-100" : "opacity-30 group-hover:opacity-70",
         )}
       >
-        {active ? (currentDir === "asc" ? "▲" : "▼") : "▲"}
+        {active ? (currentDir === "asc" ? "▲" : "▼") : "↕"}
       </span>
     </button>
   );
