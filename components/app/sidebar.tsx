@@ -10,6 +10,7 @@ const NAV = [
   { href: "/products/import", label: "Import" },
   { href: "/leads", label: "Leads" },
   { href: "/admin", label: "Admin", admin: true },
+  { href: "/admin/inventory", label: "Lagerbestand", admin: true },
 ];
 
 export function Sidebar({ orgName, isAdmin }: { orgName: string; isAdmin: boolean }) {
