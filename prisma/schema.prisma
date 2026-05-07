@@ -24,17 +24,19 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users         User[]
-  products      Product[]
-  searchRuns    SearchRun[]
-  leads         Lead[]
-  outreach      OutreachMessage[]
-  activities    Activity[]
-  notes         Note[]
-  tags          Tag[]
-  optOuts       OptOutRequest[]
-  usageLogs     UsageLog[]
-  subscription  SubscriptionPlan?
+  users              User[]
+  products           Product[]
+  searchRuns         SearchRun[]
+  leads              Lead[]
+  outreach           OutreachMessage[]
+  activities         Activity[]
+  notes              Note[]
+  tags               Tag[]
+  optOuts            OptOutRequest[]
+  usageLogs          UsageLog[]
+  subscription       SubscriptionPlan?
+  inventorySource    InventorySource?
+  inventorySnapshots InventorySnapshot[]
 }
 
 model User {
@@ -48,10 +50,10 @@ model User {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  products    Product[]
-  searchRuns  SearchRun[]
-  activities  Activity[]
-  notes       Note[]
+  products   Product[]
+  searchRuns SearchRun[]
+  activities Activity[]
+  notes      Note[]
 
   @@index([organizationId])
 }
@@ -72,32 +74,32 @@ enum TargetCustomerType {
 }
 
 model Product {
-  id              String   @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  ownerId         String
-  owner           User     @relation(fields: [ownerId], references: [id])
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ownerId        String
+  owner          User         @relation(fields: [ownerId], references: [id])
 
   // Master SKU groups variants (e.g. "AZ001" with 1er/3er/5er packs).
   // Optional, but unique within an organization when set.
-  masterSku       String?
-  name            String
-  description     String   @db.Text
-  productUrl      String?
-  category        String?
-  priceRangeMin   Int?
-  priceRangeMax   Int?
-  currency        String   @default("EUR")
-  targetRegion    String?  // "DE", "DACH", "EU", "WORLD"
+  masterSku           String?
+  name                String
+  description         String               @db.Text
+  productUrl          String?
+  category            String?
+  priceRangeMin       Int?
+  priceRangeMax       Int?
+  currency            String               @default("EUR")
+  targetRegion        String? // "DE", "DACH", "EU", "WORLD"
   targetCustomerTypes TargetCustomerType[]
-  keywords        String[]
-  exclusions      String[]
-  attachmentPath  String?  // local path for MVP, S3 key later
-  attachmentMime  String?
+  keywords            String[]
+  exclusions          String[]
+  attachmentPath      String? // local path for MVP, S3 key later
+  attachmentMime      String?
 
   // Pack/SKU variants of the same master product. Each entry shape:
   // { label, sku, packSize, price, url, raw }
-  variants        Json?
+  variants Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -111,12 +113,12 @@ model Product {
 }
 
 model ProductAnalysis {
-  id        String   @id @default(cuid())
-  productId String   @unique
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  productId String  @unique
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  shortDescription   String  @db.Text
-  valueProposition   String  @db.Text
+  shortDescription   String   @db.Text
+  valueProposition   String   @db.Text
   problemsSolved     String[]
   relevantIndustries String[]
   buyerRoles         String[]
@@ -125,10 +127,10 @@ model ProductAnalysis {
   competitorOverlap  String[]
   pitchArguments     String[]
   objections         String[]
-  searchStrategy     String  @db.Text
+  searchStrategy     String   @db.Text
 
   rawJson   Json
-  model     String?  // which AI model generated it
+  model     String? // which AI model generated it
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -143,21 +145,21 @@ enum SearchStatus {
 }
 
 model SearchRun {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   productId      String
-  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
   triggeredById  String
-  triggeredBy    User     @relation(fields: [triggeredById], references: [id])
+  triggeredBy    User         @relation(fields: [triggeredById], references: [id])
 
-  status         SearchStatus @default(QUEUED)
-  totalLeads     Int      @default(0)
-  newLeads       Int      @default(0)
-  errorMessage   String?
-  startedAt      DateTime?
-  finishedAt     DateTime?
-  createdAt      DateTime @default(now())
+  status       SearchStatus @default(QUEUED)
+  totalLeads   Int          @default(0)
+  newLeads     Int          @default(0)
+  errorMessage String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime     @default(now())
 
   queries SearchQuery[]
   leads   Lead[]
@@ -167,13 +169,13 @@ model SearchRun {
 }
 
 model SearchQuery {
-  id          String    @id @default(cuid())
-  searchRunId String
-  searchRun   SearchRun @relation(fields: [searchRunId], references: [id], onDelete: Cascade)
-  query       String
-  intent      String?
-  resultsCount Int      @default(0)
-  createdAt   DateTime  @default(now())
+  id           String    @id @default(cuid())
+  searchRunId  String
+  searchRun    SearchRun @relation(fields: [searchRunId], references: [id], onDelete: Cascade)
+  query        String
+  intent       String?
+  resultsCount Int       @default(0)
+  createdAt    DateTime  @default(now())
 
   @@index([searchRunId])
 }
@@ -200,39 +202,39 @@ enum DataQuality {
 }
 
 model Lead {
-  id              String   @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  productId       String
-  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  searchRunId     String?
-  searchRun       SearchRun? @relation(fields: [searchRunId], references: [id], onDelete: SetNull)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  searchRunId    String?
+  searchRun      SearchRun?   @relation(fields: [searchRunId], references: [id], onDelete: SetNull)
 
-  companyName     String
-  website         String?
-  industry        String?
-  city            String?
-  country         String?
-  description     String?  @db.Text
+  companyName String
+  website     String?
+  industry    String?
+  city        String?
+  country     String?
+  description String? @db.Text
 
   relevanceReason String?  @db.Text
   needSignals     String[]
   productsFound   String[]
 
-  contactEmail    String?
-  contactPhone    String?
-  contactPageUrl  String?
-  imprintUrl      String?
-  contactPerson   String?
-  contactRole     String?
+  contactEmail   String?
+  contactPhone   String?
+  contactPageUrl String?
+  imprintUrl     String?
+  contactPerson  String?
+  contactRole    String?
 
-  score           Int      @default(0)
-  scoreBreakdown  Json?
-  dataQuality     DataQuality @default(MEDIUM)
-  status          LeadStatus @default(NEW)
+  score          Int         @default(0)
+  scoreBreakdown Json?
+  dataQuality    DataQuality @default(MEDIUM)
+  status         LeadStatus  @default(NEW)
 
   // Dedup key (lower-cased canonical domain)
-  dedupKey        String?
+  dedupKey String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -243,20 +245,20 @@ model Lead {
   activities Activity[]
   tags       LeadTag[]
 
+  @@unique([organizationId, productId, dedupKey])
   @@index([organizationId])
   @@index([productId])
   @@index([status])
   @@index([dedupKey])
-  @@unique([organizationId, productId, dedupKey])
 }
 
 model LeadSource {
-  id      String @id @default(cuid())
-  leadId  String
-  lead    Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  url     String
-  kind    String // "website" | "imprint" | "directory" | "press" | etc.
-  excerpt String? @db.Text
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  url       String
+  kind      String // "website" | "imprint" | "directory" | "press" | etc.
+  excerpt   String?  @db.Text
   fetchedAt DateTime @default(now())
 
   @@index([leadId])
@@ -278,18 +280,18 @@ enum OutreachStatus {
 }
 
 model OutreachMessage {
-  id             String   @id @default(cuid())
+  id             String         @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   leadId         String
-  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead           Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
   kind           OutreachKind
   status         OutreachStatus @default(DRAFT)
 
-  subject        String?
-  body           String   @db.Text
-  rawJson        Json?
-  model          String?
+  subject String?
+  body    String  @db.Text
+  rawJson Json?
+  model   String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -300,37 +302,37 @@ model OutreachMessage {
 // ---------- CRM helpers ----------
 
 model Activity {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   leadId         String
-  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead           Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
   userId         String?
-  user           User?    @relation(fields: [userId], references: [id])
-  kind           String   // "status_change" | "note" | "email_drafted" | etc.
-  message        String   @db.Text
+  user           User?        @relation(fields: [userId], references: [id])
+  kind           String // "status_change" | "note" | "email_drafted" | etc.
+  message        String       @db.Text
   meta           Json?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
 
   @@index([leadId])
 }
 
 model Note {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   leadId         String
-  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead           Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
   authorId       String
-  author         User     @relation(fields: [authorId], references: [id])
-  body           String   @db.Text
-  createdAt      DateTime @default(now())
+  author         User         @relation(fields: [authorId], references: [id])
+  body           String       @db.Text
+  createdAt      DateTime     @default(now())
 
   @@index([leadId])
 }
 
 model Tag {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
@@ -352,13 +354,13 @@ model LeadTag {
 // ---------- Compliance / SaaS ----------
 
 model OptOutRequest {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   email          String?
   domain         String?
   reason         String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
 
   @@index([organizationId])
   @@index([email])
@@ -366,25 +368,61 @@ model OptOutRequest {
 }
 
 model SubscriptionPlan {
-  id             String   @id @default(cuid())
-  organizationId String   @unique
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  tier           String   @default("free") // "free" | "pro" | "enterprise"
-  monthlyLeadLimit Int    @default(100)
-  monthlyAnalysisLimit Int @default(20)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                   String       @id @default(cuid())
+  organizationId       String       @unique
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tier                 String       @default("free") // "free" | "pro" | "enterprise"
+  monthlyLeadLimit     Int          @default(100)
+  monthlyAnalysisLimit Int          @default(20)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
 }
 
 model UsageLog {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  kind           String   // "ai_analysis" | "search_run" | "outreach_generation"
-  count          Int      @default(1)
+  kind           String // "ai_analysis" | "search_run" | "outreach_generation"
+  count          Int          @default(1)
   meta           Json?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
 
   @@index([organizationId])
   @@index([kind])
+}
+
+// ---------- Inventory ----------
+//
+// Eine Google-Sheets-Quelle pro Organisation, die wöchentlich (Vercel-Cron)
+// in InventorySnapshot überführt wird. Bei jedem Sync wird der bestehende
+// Snapshot der Organisation gelöscht und komplett neu geschrieben.
+// Verknüpfung zu Product erfolgt über Product.masterSku == InventorySnapshot.masterSku.
+
+model InventorySource {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sheetUrl       String
+  gid            String?
+  headerRow      Int?
+  // Header-Namen aus der Sheet, die auf die internen Felder gemappt werden.
+  skuColumn      String // Spalte mit dem AZ-Code
+  stockColumn    String // Spalte mit dem verfügbaren Bestand
+  lastSyncedAt   DateTime?
+  lastError      String?      @db.Text
+  lastRowCount   Int?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model InventorySnapshot {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  masterSku      String
+  availableStock Int
+  updatedAt      DateTime     @default(now()) @updatedAt
+
+  @@unique([organizationId, masterSku])
+  @@index([organizationId])
 }
