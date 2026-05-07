@@ -405,6 +405,10 @@ model InventorySource {
   sheetUrl       String
   gid            String?
   headerRow      Int?
+  // Freitext-Beschreibung dessen, was in der Sheet erwartet wird.
+  // Wird vom KI-Auto-Mapping als Hint genutzt, um skuColumn/stockColumn
+  // anhand der Sheet-Header automatisch vorzuschlagen.
+  description    String?      @db.Text
   // Header-Namen aus der Sheet, die auf die internen Felder gemappt werden.
   skuColumn      String // Spalte mit dem AZ-Code
   stockColumn    String // Spalte mit dem verfügbaren Bestand
