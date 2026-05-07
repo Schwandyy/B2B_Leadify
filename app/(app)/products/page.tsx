@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty";
 import { ConsolidateProductsButton } from "@/components/products/consolidate-button";
 import { ProductsSearch } from "@/components/products/products-search";
 import { ProductsViewToggle, type ProductsView } from "@/components/products/view-toggle";
+import { SortableHeader, type SortKey } from "@/components/products/sortable-header";
 import { formatDateShort, relativeFromNow } from "@/lib/utils/format";
 import type { Prisma } from "@prisma/client";
 
@@ -26,6 +27,9 @@ export default async function ProductsPage({
   const stockFilter = (sp.stock as string | undefined) ?? "all";
   const page = Math.max(1, parseInt((sp.page as string | undefined) ?? "1", 10));
   const view: ProductsView = (sp.view as string | undefined) === "grid" ? "grid" : "list";
+  const sortKey = parseSortKey(sp.sort as string | undefined);
+  const sortDir: "asc" | "desc" = (sp.dir as string | undefined) === "desc" ? "desc" : "asc";
+  const orderBy = buildOrderBy(sortKey, sortDir);
 
   // Bestandsfilter: vor dem Hauptquery die SKUs holen, die zum gewählten
   // Bucket passen, dann als IN/NOT IN auf Product.masterSku anwenden.
@@ -55,7 +59,7 @@ export default async function ProductsPage({
     }),
     prisma.product.findMany({
       where,
-      orderBy: [{ masterSku: "asc" }, { createdAt: "desc" }],
+      orderBy,
       include: {
         analysis: { select: { id: true } },
         _count: { select: { leads: true, searchRuns: true } },
@@ -242,17 +246,35 @@ function ProductsTable({
   return (
     <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
       <table className="min-w-full text-sm">
-        <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+        <thead className="border-b border-slate-100 bg-slate-50 text-xs">
           <tr>
-            <th className="px-4 py-2.5 font-medium">AZ-Code</th>
-            <th className="px-4 py-2.5 font-medium">Produktname</th>
-            <th className="px-4 py-2.5 font-medium">Kategorie</th>
-            <th className="px-3 py-2.5 text-right font-medium">Bestand</th>
-            <th className="px-3 py-2.5 text-center font-medium">Varianten</th>
-            <th className="px-3 py-2.5 text-center font-medium">KI</th>
-            <th className="px-3 py-2.5 text-right font-medium">Leads</th>
-            <th className="px-3 py-2.5 text-right font-medium">Runs</th>
-            <th className="px-4 py-2.5 font-medium">Angelegt</th>
+            <th className="px-4 py-2.5">
+              <SortableHeader label="AZ-Code" sortKey="masterSku" />
+            </th>
+            <th className="px-4 py-2.5">
+              <SortableHeader label="Produktname" sortKey="name" />
+            </th>
+            <th className="px-4 py-2.5">
+              <SortableHeader label="Kategorie" sortKey="category" />
+            </th>
+            <th className="px-3 py-2.5 text-right font-medium uppercase tracking-wide text-slate-500">
+              Bestand
+            </th>
+            <th className="px-3 py-2.5 text-center font-medium uppercase tracking-wide text-slate-500">
+              Varianten
+            </th>
+            <th className="px-3 py-2.5 text-center font-medium uppercase tracking-wide text-slate-500">
+              KI
+            </th>
+            <th className="px-3 py-2.5">
+              <SortableHeader label="Leads" sortKey="leads" align="right" />
+            </th>
+            <th className="px-3 py-2.5">
+              <SortableHeader label="Runs" sortKey="runs" align="right" />
+            </th>
+            <th className="px-4 py-2.5">
+              <SortableHeader label="Angelegt" sortKey="createdAt" />
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -361,6 +383,35 @@ function pageHref(sp: Record<string, string | string[] | undefined>, page: numbe
 
 function computeAgeDays(syncedAt: Date): number {
   return (Date.now() - syncedAt.getTime()) / 86_400_000;
+}
+
+const VALID_SORT_KEYS: SortKey[] = ["masterSku", "name", "category", "leads", "runs", "createdAt"];
+
+function parseSortKey(input: string | undefined): SortKey {
+  if (input && (VALID_SORT_KEYS as string[]).includes(input)) return input as SortKey;
+  return "masterSku";
+}
+
+function buildOrderBy(
+  key: SortKey,
+  dir: "asc" | "desc",
+): Prisma.ProductOrderByWithRelationInput[] {
+  // Sekundärsortierung sorgt für stabile Reihenfolge bei gleichen Werten.
+  switch (key) {
+    case "name":
+      return [{ name: dir }, { masterSku: "asc" }];
+    case "category":
+      return [{ category: dir }, { masterSku: "asc" }];
+    case "leads":
+      return [{ leads: { _count: dir } }, { masterSku: "asc" }];
+    case "runs":
+      return [{ searchRuns: { _count: dir } }, { masterSku: "asc" }];
+    case "createdAt":
+      return [{ createdAt: dir }, { masterSku: "asc" }];
+    case "masterSku":
+    default:
+      return [{ masterSku: dir }, { createdAt: "desc" }];
+  }
 }
 
 function emptyStateText(q: string | undefined, stockFilter: string): string {
