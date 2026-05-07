@@ -27,7 +27,7 @@ cp .env.example .env
 npm run db:push        # Schema einspielen (für initialen MVP)
 npm run db:seed        # Demo-Workspace + Demo-User anlegen
 
-# 4. Dev-Server
+# 4. Dev-Server (läuft auf http://localhost:3100, damit Port 3000 frei bleibt)
 npm run dev
 ```
 
