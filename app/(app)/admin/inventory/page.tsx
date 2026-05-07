@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { Card, CardBody, CardHeader, CardSubtitle, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { InventoryForm } from "@/components/admin/inventory-form";
+import { ResyncProductsButton } from "@/components/admin/resync-products-button";
 import { formatDateTime, relativeFromNow } from "@/lib/utils/format";
 
 export const dynamic = "force-dynamic";
@@ -61,6 +62,22 @@ export default async function InventoryAdminPage() {
           <InventoryForm initial={initial} />
         </CardBody>
       </Card>
+
+      {source ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Produktstammdaten aus Sheet</CardTitle>
+            <CardSubtitle>
+              Aktualisiert <code className="font-mono text-xs">Product.name</code> aus der
+              Master-Sheet und legt fehlende AZ-Codes als neue Produkte an. Bestände
+              bleiben automatisch zugeordnet.
+            </CardSubtitle>
+          </CardHeader>
+          <CardBody>
+            <ResyncProductsButton />
+          </CardBody>
+        </Card>
+      ) : null}
 
       {source ? (
         <Card>

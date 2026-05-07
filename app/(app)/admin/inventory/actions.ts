@@ -166,6 +166,104 @@ export async function runInventorySync(): Promise<SyncActionResult> {
   };
 }
 
+export type ResyncProductsResult =
+  | { ok: true; updated: number; created: number; unchanged: number }
+  | { ok: false; error: string };
+
+/**
+ * Gleicht Product.name in der DB gegen die Master-Sheet ab.
+ * Existiert ein Produkt mit der AZ-Code-Master-SKU, wird der Name
+ * aktualisiert; fehlt es, wird ein neues angelegt. Bestände bleiben
+ * automatisch zugeordnet (über masterSku-String).
+ */
+export async function resyncProductsFromMaster(): Promise<ResyncProductsResult> {
+  const user = await requireAdmin();
+  const source = await prisma.inventorySource.findUnique({
+    where: { organizationId: user.organizationId },
+  });
+  if (!source) {
+    return { ok: false, error: "Keine Sheet-Quelle hinterlegt — vorher oben verbinden." };
+  }
+
+  let parsed;
+  try {
+    parsed = await parseGoogleSheet(source.sheetUrl, {
+      sheetName: source.tabName ?? undefined,
+      gid: source.gid ?? undefined,
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Sheet konnte nicht gelesen werden.",
+    };
+  }
+
+  const productHeader = pickProductHeader(parsed.headers);
+  if (!productHeader) {
+    return {
+      ok: false,
+      error: `Konnte keine Produkt-Spalte in der Sheet erkennen. Headers: ${parsed.headers.join(", ")}`,
+    };
+  }
+
+  const owner = await prisma.user.findFirst({
+    where: { organizationId: user.organizationId },
+    orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+    select: { id: true },
+  });
+  if (!owner) return { ok: false, error: "Kein User in der Organisation gefunden." };
+
+  let updated = 0;
+  let created = 0;
+  let unchanged = 0;
+  const seen = new Set<string>();
+
+  for (const row of parsed.rows) {
+    const sku = (row[source.skuColumn] ?? "").trim();
+    const newName = (row[productHeader] ?? "").trim();
+    if (!sku || !newName || seen.has(sku)) continue;
+    seen.add(sku);
+
+    const existing = await prisma.product.findFirst({
+      where: { organizationId: user.organizationId, masterSku: sku },
+      select: { id: true, name: true },
+    });
+
+    if (!existing) {
+      await prisma.product.create({
+        data: {
+          organizationId: user.organizationId,
+          ownerId: owner.id,
+          masterSku: sku,
+          name: newName,
+          description: "",
+          targetCustomerTypes: [],
+          keywords: [],
+          exclusions: [],
+        },
+      });
+      created += 1;
+    } else if (existing.name !== newName) {
+      await prisma.product.update({ where: { id: existing.id }, data: { name: newName } });
+      updated += 1;
+    } else {
+      unchanged += 1;
+    }
+  }
+
+  revalidatePath("/products");
+  revalidatePath("/admin/inventory");
+  return { ok: true, updated, created, unchanged };
+}
+
+function pickProductHeader(headers: string[]): string | null {
+  const candidates = ["Product", "Produkt", "Produktname", "Name"];
+  for (const candidate of candidates) {
+    if (headers.includes(candidate)) return candidate;
+  }
+  return headers[2] ?? null;
+}
+
 export async function deleteInventorySource(): Promise<void> {
   const user = await requireAdmin();
   await prisma.$transaction([
