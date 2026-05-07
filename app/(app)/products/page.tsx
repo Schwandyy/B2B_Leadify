@@ -9,8 +9,9 @@ import { ConsolidateProductsButton } from "@/components/products/consolidate-but
 import { ProductsSearch } from "@/components/products/products-search";
 import { ProductsViewToggle, type ProductsView } from "@/components/products/view-toggle";
 import { SortableHeader, type SortKey } from "@/components/products/sortable-header";
+import { ColumnFilter, type FilterOption } from "@/components/products/column-filter";
 import { formatDateShort, relativeFromNow } from "@/lib/utils/format";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 const STALE_AFTER_DAYS = 7;
 
@@ -31,6 +32,12 @@ export default async function ProductsPage({
   const sortDir: "asc" | "desc" = (sp.dir as string | undefined) === "desc" ? "desc" : "asc";
   const orderBy = buildOrderBy(sortKey, sortDir);
 
+  const catFilter = (sp.cat as string | undefined) ?? "";
+  const kiFilter = (sp.ki as string | undefined) ?? "";
+  const leadsFilter = (sp.leads as string | undefined) ?? "";
+  const runsFilter = (sp.runs as string | undefined) ?? "";
+  const variantsFilter = (sp.variants as string | undefined) ?? "";
+
   // Bestandsfilter: vor dem Hauptquery die SKUs holen, die zum gewählten
   // Bucket passen, dann als IN/NOT IN auf Product.masterSku anwenden.
   const skuFilter = await buildStockSkuFilter(stockFilter, user.organizationId);
@@ -46,6 +53,15 @@ export default async function ProductsPage({
       ],
     });
   }
+  if (catFilter) conditions.push({ category: catFilter });
+  if (kiFilter === "yes") conditions.push({ analysis: { isNot: null } });
+  else if (kiFilter === "no") conditions.push({ analysis: { is: null } });
+  if (leadsFilter === "positive") conditions.push({ leads: { some: {} } });
+  else if (leadsFilter === "zero") conditions.push({ leads: { none: {} } });
+  if (runsFilter === "positive") conditions.push({ searchRuns: { some: {} } });
+  else if (runsFilter === "zero") conditions.push({ searchRuns: { none: {} } });
+  if (variantsFilter === "yes") conditions.push({ variants: { not: Prisma.JsonNull } });
+  else if (variantsFilter === "no") conditions.push({ variants: { equals: Prisma.JsonNull } });
 
   const where: Prisma.ProductWhereInput = {
     organizationId: user.organizationId,
@@ -90,6 +106,21 @@ export default async function ProductsPage({
     where: { organizationId: user.organizationId },
     select: { lastSyncedAt: true, lastError: true },
   });
+
+  // Distinct-Kategorien für den Spaltenfilter "Kategorie" (alphabetisch).
+  const distinctCategories = await prisma.product.findMany({
+    where: { organizationId: user.organizationId, category: { not: null } },
+    distinct: ["category"],
+    select: { category: true },
+    orderBy: { category: "asc" },
+  });
+  const categoryOptions: FilterOption[] = [
+    { value: "", label: "Alle" },
+    ...distinctCategories
+      .map((c) => c.category)
+      .filter((c): c is string => Boolean(c))
+      .map((c) => ({ value: c, label: c })),
+  ];
   const inventoryAgeDays = inventorySource?.lastSyncedAt
     ? computeAgeDays(inventorySource.lastSyncedAt)
     : Number.POSITIVE_INFINITY;
@@ -107,7 +138,7 @@ export default async function ProductsPage({
           <h1 className="text-2xl font-semibold tracking-tight">Produkte</h1>
           <p className="text-sm text-slate-500">
             {allCount} Produkte · {withSku} mit Master-SKU · {withoutSku} ohne
-            {q || stockFilter !== "all" ? (
+            {q || stockFilter !== "all" || catFilter || kiFilter || leadsFilter || runsFilter || variantsFilter ? (
               <span> · gefiltert: {total} Treffer</span>
             ) : null}
           </p>
@@ -144,7 +175,18 @@ export default async function ProductsPage({
       ) : view === "grid" ? (
         <ProductsGrid products={products} stockBySku={stockBySku} />
       ) : (
-        <ProductsTable products={products} stockBySku={stockBySku} />
+        <ProductsTable
+          products={products}
+          stockBySku={stockBySku}
+          filters={{
+            cat: catFilter,
+            ki: kiFilter,
+            leads: leadsFilter,
+            runs: runsFilter,
+            variants: variantsFilter,
+          }}
+          categoryOptions={categoryOptions}
+        />
       )}
 
       {totalPages > 1 && products.length > 0 ? (
@@ -239,10 +281,24 @@ function ProductsGrid({
 function ProductsTable({
   products,
   stockBySku,
+  filters,
+  categoryOptions,
 }: {
   products: Row[];
   stockBySku: Map<string, number>;
+  filters: { cat: string; ki: string; leads: string; runs: string; variants: string };
+  categoryOptions: FilterOption[];
 }) {
+  const presence: FilterOption[] = [
+    { value: "", label: "Alle" },
+    { value: "yes", label: "Ja" },
+    { value: "no", label: "Nein" },
+  ];
+  const positivity: FilterOption[] = [
+    { value: "", label: "Alle" },
+    { value: "positive", label: ">0" },
+    { value: "zero", label: "0" },
+  ];
   return (
     <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
       <table className="min-w-full text-sm">
@@ -274,6 +330,35 @@ function ProductsTable({
             </th>
             <th className="px-4 py-2.5">
               <SortableHeader label="Angelegt" sortKey="createdAt" />
+            </th>
+          </tr>
+          <tr className="border-b border-slate-100 bg-white">
+            <th className="px-4 pb-2 pt-1 align-top">
+              <span className="block text-[10px] uppercase tracking-wide text-slate-300">via Suche</span>
+            </th>
+            <th className="px-4 pb-2 pt-1 align-top">
+              <span className="block text-[10px] uppercase tracking-wide text-slate-300">via Suche</span>
+            </th>
+            <th className="px-4 pb-2 pt-1 align-top">
+              <ColumnFilter param="cat" options={categoryOptions} current={filters.cat} />
+            </th>
+            <th className="px-3 pb-2 pt-1 align-top">
+              <span className="block text-[10px] uppercase tracking-wide text-slate-300">oben</span>
+            </th>
+            <th className="px-3 pb-2 pt-1 align-top">
+              <ColumnFilter param="variants" options={presence} current={filters.variants} />
+            </th>
+            <th className="px-3 pb-2 pt-1 align-top">
+              <ColumnFilter param="ki" options={presence} current={filters.ki} />
+            </th>
+            <th className="px-3 pb-2 pt-1 align-top">
+              <ColumnFilter param="leads" options={positivity} current={filters.leads} />
+            </th>
+            <th className="px-3 pb-2 pt-1 align-top">
+              <ColumnFilter param="runs" options={positivity} current={filters.runs} />
+            </th>
+            <th className="px-4 pb-2 pt-1 align-top">
+              <span className="block text-[10px] uppercase tracking-wide text-slate-300">—</span>
             </th>
           </tr>
         </thead>
