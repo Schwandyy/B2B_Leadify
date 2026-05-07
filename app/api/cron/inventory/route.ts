@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { syncInventory } from "@/lib/inventory/sync";
 
-// Vercel-Cron läuft ohne Cookie-Session. Wir verifizieren über CRON_SECRET,
-// das Vercel als Bearer-Token in den Authorization-Header schreibt.
-// Cron-Konfiguration: vercel.json (wöchentlich Mo 06:00 UTC).
+// Endpoint für externe Scheduler (GitHub Actions / cron-job.org / Vercel-Cron / etc.).
+// Auth über CRON_SECRET als Bearer-Token im Authorization-Header.
+// Aufruf-Beispiel:
+//   curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/inventory
+// Empfohlene Frequenz: wöchentlich. Solange die App nur lokal läuft, bleibt
+// der manuelle Sync-Button unter /admin/inventory der primäre Auslöser.
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

@@ -8,8 +8,10 @@ import { EmptyState } from "@/components/ui/empty";
 import { ConsolidateProductsButton } from "@/components/products/consolidate-button";
 import { ProductsSearch } from "@/components/products/products-search";
 import { ProductsViewToggle, type ProductsView } from "@/components/products/view-toggle";
-import { formatDateShort } from "@/lib/utils/format";
+import { formatDateShort, relativeFromNow } from "@/lib/utils/format";
 import type { Prisma } from "@prisma/client";
+
+const STALE_AFTER_DAYS = 7;
 
 const PAGE_SIZE = 60;
 
@@ -71,6 +73,11 @@ export default async function ProductsPage({
       : [];
   const stockBySku = new Map(stockRows.map((r) => [r.masterSku, r.availableStock]));
 
+  const inventorySource = await prisma.inventorySource.findUnique({
+    where: { organizationId: user.organizationId },
+    select: { lastSyncedAt: true, lastError: true },
+  });
+
   const allCount = await prisma.product.count({
     where: { organizationId: user.organizationId },
   });
@@ -96,6 +103,13 @@ export default async function ProductsPage({
       </div>
 
       <ProductsSearch />
+
+      {inventorySource ? (
+        <InventoryStatus
+          source={inventorySource}
+          isAdmin={user.role === "ADMIN"}
+        />
+      ) : null}
 
       {allCount === 0 ? (
         <EmptyState
@@ -265,6 +279,56 @@ function ProductsTable({
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function InventoryStatus({
+  source,
+  isAdmin,
+}: {
+  source: { lastSyncedAt: Date | null; lastError: string | null };
+  isAdmin: boolean;
+}) {
+  const ageDays = source.lastSyncedAt
+    ? (Date.now() - source.lastSyncedAt.getTime()) / (1000 * 60 * 60 * 24)
+    : Infinity;
+  const stale = ageDays > STALE_AFTER_DAYS;
+  const hasError = Boolean(source.lastError);
+
+  let tone: "ok" | "warn" | "err";
+  let label: string;
+  if (hasError) {
+    tone = "err";
+    label = "Bestand-Sync fehlgeschlagen";
+  } else if (!source.lastSyncedAt) {
+    tone = "warn";
+    label = "Bestand noch nicht synchronisiert";
+  } else if (stale) {
+    tone = "warn";
+    label = `Bestand zuletzt aktualisiert ${relativeFromNow(source.lastSyncedAt)}`;
+  } else {
+    tone = "ok";
+    label = `Bestand aktualisiert ${relativeFromNow(source.lastSyncedAt)}`;
+  }
+
+  const styles =
+    tone === "err"
+      ? "border-rose-200 bg-rose-50 text-rose-900"
+      : tone === "warn"
+        ? "border-amber-200 bg-amber-50 text-amber-900"
+        : "border-slate-200 bg-slate-50 text-slate-600";
+
+  return (
+    <div
+      className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-4 py-2 text-xs ${styles}`}
+    >
+      <span>{label}</span>
+      {isAdmin ? (
+        <Link href="/admin/inventory" className="font-medium underline-offset-2 hover:underline">
+          {hasError || stale || !source.lastSyncedAt ? "Jetzt aktualisieren →" : "Verwalten"}
+        </Link>
+      ) : null}
     </div>
   );
 }
