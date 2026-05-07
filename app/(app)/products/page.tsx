@@ -23,20 +23,29 @@ export default async function ProductsPage({
   const sp = await searchParams;
   const user = await requireUser();
   const q = (sp.q as string | undefined)?.trim();
+  const stockFilter = (sp.stock as string | undefined) ?? "all";
   const page = Math.max(1, parseInt((sp.page as string | undefined) ?? "1", 10));
   const view: ProductsView = (sp.view as string | undefined) === "grid" ? "grid" : "list";
 
+  // Bestandsfilter: vor dem Hauptquery die SKUs holen, die zum gewählten
+  // Bucket passen, dann als IN/NOT IN auf Product.masterSku anwenden.
+  const skuFilter = await buildStockSkuFilter(stockFilter, user.organizationId);
+
+  const conditions: Prisma.ProductWhereInput[] = [];
+  if (skuFilter) conditions.push({ masterSku: skuFilter });
+  if (q) {
+    conditions.push({
+      OR: [
+        { masterSku: { contains: q, mode: "insensitive" } },
+        { name: { contains: q, mode: "insensitive" } },
+        { category: { contains: q, mode: "insensitive" } },
+      ],
+    });
+  }
+
   const where: Prisma.ProductWhereInput = {
     organizationId: user.organizationId,
-    ...(q
-      ? {
-          OR: [
-            { masterSku: { contains: q, mode: "insensitive" } },
-            { name: { contains: q, mode: "insensitive" } },
-            { category: { contains: q, mode: "insensitive" } },
-          ],
-        }
-      : {}),
+    ...(conditions.length > 0 ? { AND: conditions } : {}),
   };
 
   const [total, withSku, products] = await Promise.all([
@@ -77,6 +86,9 @@ export default async function ProductsPage({
     where: { organizationId: user.organizationId },
     select: { lastSyncedAt: true, lastError: true },
   });
+  const inventoryAgeDays = inventorySource?.lastSyncedAt
+    ? computeAgeDays(inventorySource.lastSyncedAt)
+    : Number.POSITIVE_INFINITY;
 
   const allCount = await prisma.product.count({
     where: { organizationId: user.organizationId },
@@ -91,7 +103,9 @@ export default async function ProductsPage({
           <h1 className="text-2xl font-semibold tracking-tight">Produkte</h1>
           <p className="text-sm text-slate-500">
             {allCount} Produkte · {withSku} mit Master-SKU · {withoutSku} ohne
-            {q ? <span> · gefiltert: {total} Treffer</span> : null}
+            {q || stockFilter !== "all" ? (
+              <span> · gefiltert: {total} Treffer</span>
+            ) : null}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -108,6 +122,7 @@ export default async function ProductsPage({
         <InventoryStatus
           source={inventorySource}
           isAdmin={user.role === "ADMIN"}
+          ageDays={inventoryAgeDays}
         />
       ) : null}
 
@@ -118,7 +133,10 @@ export default async function ProductsPage({
           action={<Link href="/products/new"><Button size="sm">Erstes Produkt anlegen</Button></Link>}
         />
       ) : products.length === 0 ? (
-        <EmptyState title="Keine Treffer" description={`Kein Produkt passt zu "${q ?? ""}".`} />
+        <EmptyState
+          title="Keine Treffer"
+          description={emptyStateText(q, stockFilter)}
+        />
       ) : view === "grid" ? (
         <ProductsGrid products={products} stockBySku={stockBySku} />
       ) : (
@@ -286,13 +304,12 @@ function ProductsTable({
 function InventoryStatus({
   source,
   isAdmin,
+  ageDays,
 }: {
   source: { lastSyncedAt: Date | null; lastError: string | null };
   isAdmin: boolean;
+  ageDays: number;
 }) {
-  const ageDays = source.lastSyncedAt
-    ? (Date.now() - source.lastSyncedAt.getTime()) / (1000 * 60 * 60 * 24)
-    : Infinity;
   const stale = ageDays > STALE_AFTER_DAYS;
   const hasError = Boolean(source.lastError);
 
@@ -340,4 +357,57 @@ function pageHref(sp: Record<string, string | string[] | undefined>, page: numbe
   }
   next.set("page", String(page));
   return `/products?${next.toString()}`;
+}
+
+function computeAgeDays(syncedAt: Date): number {
+  return (Date.now() - syncedAt.getTime()) / 86_400_000;
+}
+
+function emptyStateText(q: string | undefined, stockFilter: string): string {
+  const filters: string[] = [];
+  if (q) filters.push(`Suche „${q}"`);
+  const stockLabel: Record<string, string> = {
+    in_stock: "Auf Lager",
+    low: "Niedriger Bestand (1–10)",
+    out: "Ausverkauft",
+    none: "Ohne Bestandsdaten",
+  };
+  if (stockFilter && stockLabel[stockFilter]) filters.push(`Bestand: ${stockLabel[stockFilter]}`);
+  return filters.length > 0 ? `Kein Produkt passt zu: ${filters.join(" · ")}.` : "Kein Produkt gefunden.";
+}
+
+/**
+ * Baut den masterSku-Filter (in/notIn) für den gewählten Bestand-Bucket.
+ * "all" → null (kein Filter); andere Buckets → konkrete SKU-Liste.
+ */
+async function buildStockSkuFilter(
+  stockFilter: string,
+  organizationId: string,
+): Promise<{ in: string[] } | { notIn: string[] } | null> {
+  if (stockFilter === "all" || !stockFilter) return null;
+
+  if (stockFilter === "none") {
+    const all = await prisma.inventorySnapshot.findMany({
+      where: { organizationId },
+      select: { masterSku: true },
+    });
+    // Falls noch keine Snapshots existieren, würde "notIn: []" alle Produkte
+    // zurückliefern — das wäre verwirrend. Stattdessen: leerer Filter.
+    if (all.length === 0) return null;
+    return { notIn: all.map((s) => s.masterSku) };
+  }
+
+  let stockCondition: Prisma.IntFilter | number = 0;
+  if (stockFilter === "in_stock") stockCondition = { gt: 0 };
+  else if (stockFilter === "low") stockCondition = { gt: 0, lte: 10 };
+  else if (stockFilter === "out") stockCondition = 0;
+  else return null;
+
+  const matching = await prisma.inventorySnapshot.findMany({
+    where: { organizationId, availableStock: stockCondition },
+    select: { masterSku: true },
+  });
+  // "in: []" findet nichts — gewünschtes Verhalten: kein Treffer für leere
+  // Buckets statt aller Produkte.
+  return { in: matching.map((s) => s.masterSku) };
 }
