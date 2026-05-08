@@ -12,17 +12,24 @@ export function RegisterForm() {
   return (
     <form action={formAction} className="space-y-4">
       <div>
-        <Label htmlFor="name">Ihr Name</Label>
+        <Label htmlFor="name">Dein Name</Label>
         <Input id="name" name="name" type="text" autoComplete="name" required />
       </div>
       <div>
-        <Label htmlFor="organizationName">Firmen-/Workspace-Name</Label>
-        <Input id="organizationName" name="organizationName" type="text" autoComplete="organization" required />
-        <FieldHint>Sie sind der Admin Ihres Workspaces.</FieldHint>
-      </div>
-      <div>
         <Label htmlFor="email">E-Mail</Label>
-        <Input id="email" name="email" type="email" autoComplete="email" required />
+        <Input
+          id="email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          required
+          placeholder="vorname.nachname@az-delivery.com"
+          pattern=".+@az-delivery\.com"
+          title="Nur Adressen mit @az-delivery.com sind erlaubt."
+        />
+        <FieldHint>
+          Nur Adressen mit <code>@az-delivery.com</code>.
+        </FieldHint>
       </div>
       <div>
         <Label htmlFor="password">Passwort</Label>

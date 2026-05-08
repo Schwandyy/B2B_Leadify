@@ -15,20 +15,15 @@ const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   name: z.string().min(1).max(100),
-  organizationName: z.string().min(2).max(120),
 });
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
-function slugify(input: string): string {
-  return input
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 48);
-}
+// Nur Email-Adressen mit dieser Domain dürfen sich registrieren.
+// Override per env REGISTER_ALLOWED_DOMAIN möglich (z. B. für Tests).
+const ALLOWED_DOMAIN = (process.env.REGISTER_ALLOWED_DOMAIN ?? "az-delivery.com").toLowerCase();
+const FALLBACK_ORG_NAME = "AZ-Delivery";
+const FALLBACK_ORG_SLUG = "az-delivery";
 
 export async function loginAction(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   const parsed = loginSchema.safeParse({
@@ -52,40 +47,52 @@ export async function registerAction(_prev: ActionResult | null, formData: FormD
     email: formData.get("email"),
     password: formData.get("password"),
     name: formData.get("name"),
-    organizationName: formData.get("organizationName"),
   });
   if (!parsed.success) {
     return { ok: false, error: "Bitte alle Felder korrekt ausfüllen (Passwort ≥ 8 Zeichen)." };
   }
-  const { email, password, name, organizationName } = parsed.data;
+  const { email, password, name } = parsed.data;
   const lowerEmail = email.toLowerCase();
+
+  // Domain-Restriction: nur Mitglieder mit @az-delivery.com-Adresse.
+  if (!lowerEmail.endsWith(`@${ALLOWED_DOMAIN}`)) {
+    return {
+      ok: false,
+      error: `Registrierung nur mit einer @${ALLOWED_DOMAIN}-Adresse möglich.`,
+    };
+  }
+
   const existing = await prisma.user.findUnique({ where: { email: lowerEmail } });
   if (existing) return { ok: false, error: "Diese E-Mail ist bereits registriert." };
 
-  const baseSlug = slugify(organizationName) || "org";
-  let slug = baseSlug;
-  for (let i = 0; i < 5; i++) {
-    const taken = await prisma.organization.findUnique({ where: { slug } });
-    if (!taken) break;
-    slug = `${baseSlug}-${Math.random().toString(36).slice(2, 6)}`;
-  }
-
+  // Single-Tenant: alle AZ-Mitarbeiter landen in derselben Organisation.
+  // Wenn schon eine existiert, wird die genutzt; sonst wird eine angelegt.
+  // Erster User wird ADMIN, alle weiteren MEMBER (ein Admin kann später
+  // promoten).
   const passwordHash = await hashPassword(password);
 
   const user = await prisma.$transaction(async (tx) => {
-    const org = await tx.organization.create({
-      data: {
-        name: organizationName,
-        slug,
-        subscription: { create: { tier: "free" } },
-      },
-    });
+    let org = await tx.organization.findFirst({ orderBy: { createdAt: "asc" } });
+    let isFirstInOrg = false;
+    if (!org) {
+      org = await tx.organization.create({
+        data: {
+          name: FALLBACK_ORG_NAME,
+          slug: FALLBACK_ORG_SLUG,
+          subscription: { create: { tier: "free" } },
+        },
+      });
+      isFirstInOrg = true;
+    } else {
+      const userCount = await tx.user.count({ where: { organizationId: org.id } });
+      isFirstInOrg = userCount === 0;
+    }
     return tx.user.create({
       data: {
         email: lowerEmail,
         passwordHash,
         name,
-        role: "ADMIN", // first user of an org is admin
+        role: isFirstInOrg ? "ADMIN" : "MEMBER",
         organizationId: org.id,
       },
     });
