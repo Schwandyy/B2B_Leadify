@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { requireAdmin } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import { syncInventory } from "@/lib/inventory/sync";
@@ -171,10 +172,12 @@ export type ResyncProductsResult =
   | { ok: false; error: string };
 
 /**
- * Gleicht Product.name in der DB gegen die Master-Sheet ab.
- * Existiert ein Produkt mit der AZ-Code-Master-SKU, wird der Name
- * aktualisiert; fehlt es, wird ein neues angelegt. Bestände bleiben
- * automatisch zugeordnet (über masterSku-String).
+ * Gleicht Produkt-Stammdaten gegen die Master-Sheet ab. Aktualisiert für
+ * existierende Produkte name + productUrl; leert variants, wenn der neue
+ * Master-ASIN nicht mehr in den vorhandenen Pack-ASINs vorkommt (= alte
+ * Pack-Varianten gehören zu einem anderen Produkt). Fehlende AZ-Codes
+ * werden als neue Produkte angelegt. Bestände bleiben automatisch
+ * zugeordnet — InventorySnapshot ist über masterSku-String verknüpft.
  */
 export async function resyncProductsFromMaster(): Promise<ResyncProductsResult> {
   const user = await requireAdmin();
@@ -205,6 +208,8 @@ export async function resyncProductsFromMaster(): Promise<ResyncProductsResult> 
       error: `Konnte keine Produkt-Spalte in der Sheet erkennen. Headers: ${parsed.headers.join(", ")}`,
     };
   }
+  const linkHeader = pickLinkHeader(parsed.headers);
+  const asinHeader = pickAsinHeader(parsed.headers);
 
   const owner = await prisma.user.findFirst({
     where: { organizationId: user.organizationId },
@@ -224,9 +229,11 @@ export async function resyncProductsFromMaster(): Promise<ResyncProductsResult> 
     if (!sku || !newName || seen.has(sku)) continue;
     seen.add(sku);
 
+    const newUrl = normalizeUrl(linkHeader ? row[linkHeader] : "", asinHeader ? row[asinHeader] : "");
+
     const existing = await prisma.product.findFirst({
       where: { organizationId: user.organizationId, masterSku: sku },
-      select: { id: true, name: true },
+      select: { id: true, name: true, productUrl: true, variants: true },
     });
 
     if (!existing) {
@@ -236,6 +243,7 @@ export async function resyncProductsFromMaster(): Promise<ResyncProductsResult> 
           ownerId: owner.id,
           masterSku: sku,
           name: newName,
+          productUrl: newUrl ?? undefined,
           description: "",
           targetCustomerTypes: [],
           keywords: [],
@@ -243,12 +251,25 @@ export async function resyncProductsFromMaster(): Promise<ResyncProductsResult> 
         },
       });
       created += 1;
-    } else if (existing.name !== newName) {
-      await prisma.product.update({ where: { id: existing.id }, data: { name: newName } });
-      updated += 1;
-    } else {
-      unchanged += 1;
+      continue;
     }
+
+    const nameChanged = existing.name !== newName;
+    const urlChanged = newUrl !== null && existing.productUrl !== newUrl;
+    const variantsStale = newUrl ? variantsAreStale(existing.variants, newUrl) : false;
+    if (!nameChanged && !urlChanged && !variantsStale) {
+      unchanged += 1;
+      continue;
+    }
+    await prisma.product.update({
+      where: { id: existing.id },
+      data: {
+        ...(nameChanged ? { name: newName } : {}),
+        ...(newUrl !== null && urlChanged ? { productUrl: newUrl } : {}),
+        ...(nameChanged || variantsStale ? { variants: Prisma.JsonNull } : {}),
+      },
+    });
+    updated += 1;
   }
 
   revalidatePath("/products");
@@ -262,6 +283,56 @@ function pickProductHeader(headers: string[]): string | null {
     if (headers.includes(candidate)) return candidate;
   }
   return headers[2] ?? null;
+}
+
+function pickLinkHeader(headers: string[]): string | null {
+  for (const candidate of ["Link", "URL", "Url"]) {
+    if (headers.includes(candidate)) return candidate;
+  }
+  return null;
+}
+
+function pickAsinHeader(headers: string[]): string | null {
+  for (const candidate of ["First ASIN", "ASIN"]) {
+    if (headers.includes(candidate)) return candidate;
+  }
+  return null;
+}
+
+function normalizeUrl(linkRaw: string | undefined, asinRaw: string | undefined): string | null {
+  const link = (linkRaw ?? "").trim();
+  if (link) {
+    if (/^https?:\/\//i.test(link)) return link;
+    if (/^amazon\./i.test(link)) return `https://www.${link.replace(/^https?:\/\/(www\.)?/, "")}`;
+    if (/^[A-Z0-9]{10}$/.test(link)) return `https://www.amazon.de/dp/${link}`;
+  }
+  const asin = (asinRaw ?? "").trim();
+  if (/^[A-Z0-9]{10}$/.test(asin)) return `https://www.amazon.de/dp/${asin}`;
+  return null;
+}
+
+function variantsAreStale(variants: unknown, newUrl: string): boolean {
+  if (!Array.isArray(variants) || variants.length === 0) return false;
+  const newAsin = extractAsin(newUrl);
+  if (!newAsin) return false;
+  for (const v of variants) {
+    if (typeof v !== "object" || v === null) continue;
+    const candidates = [
+      (v as Record<string, unknown>).url,
+      (v as Record<string, unknown>).asin,
+      (v as Record<string, unknown>).sku,
+    ];
+    for (const c of candidates) {
+      if (typeof c !== "string") continue;
+      if (extractAsin(c) === newAsin) return false;
+    }
+  }
+  return true;
+}
+
+function extractAsin(s: string): string | null {
+  const m = s.match(/\b(B0[A-Z0-9]{8})\b/);
+  return m ? m[1] : null;
 }
 
 export async function deleteInventorySource(): Promise<void> {
