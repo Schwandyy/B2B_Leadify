@@ -8,6 +8,8 @@ export function proxy(request: NextRequest) {
     PUBLIC_PATHS.includes(pathname) ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/api/health") ||
+    pathname.startsWith("/api/cron/") ||
     pathname.startsWith("/favicon");
 
   const session = request.cookies.get("p2l_session")?.value;
