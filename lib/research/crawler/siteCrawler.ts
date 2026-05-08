@@ -4,18 +4,35 @@ import { parseImprintHtml, type ImprintFields } from "./imprintParser";
 
 const COMMON_PATHS = [
   "/impressum",
+  "/impressum/",
   "/imprint",
   "/legal-notice",
+  "/pages/impressum",
+  "/pages/imprint",
+  "/pages/legal-notice",
+  // Shopify-Standard-URLs
+  "/policies/legal-notice",
+  "/policies/contact-information",
   "/kontakt",
   "/contact",
   "/contact-us",
+  "/pages/kontakt",
+  "/pages/contact",
   "/ueber-uns",
   "/about",
   "/about-us",
   "/unternehmen",
   "/firmenprofil",
-  "/datenschutz",
 ];
+
+// Typische Slug-Bestandteile, die ein Treffer NICHT sein darf — vermeidet
+// dass der Crawler Produktdetail- oder Blogseiten als Contact-Page einstuft.
+const SLUG_NEGATIVE = /(produkt|product|blog|post|article|kategorie|category|sortiment|temperaturmessung|all-in-one|ruckruffunktion|messenger|button|how-?to|tutorial)/i;
+// Maximale Tiefe einer Contact/Impressum-Seite. /pages/kontakt = 2 Segmente OK,
+// /bauelemente/buchsen-stecker/kontakte = 3 nicht.
+const MAX_PATH_SEGMENTS = 2;
+// Visit-Budget — je größer, desto besser die Trefferquote, aber langsamer.
+const MAX_VISITS = 4;
 
 const LINK_KEYWORDS = [
   "impressum",
@@ -64,12 +81,16 @@ export async function crawlSite(rootUrl: string): Promise<Site | undefined> {
     phones: [],
   };
 
-  // Visit at most two extra pages to keep crawls fast and polite.
+  // Visit-Budget aufteilen: erst gefundene Links (gefiltert), dann
+  // Common-Paths als Fallback. Anders als zuvor wird Common-Paths IMMER
+  // versucht, solange noch Budget übrig ist — auch wenn schon ein
+  // Impressum/Contact gefunden wurde, aber Email/Phone noch leer sind.
   const tried = new Set<string>([home.finalUrl]);
   let visits = 0;
   for (const link of candidateLinks) {
-    if (visits >= 2) break;
+    if (visits >= MAX_VISITS) break;
     if (tried.has(link.url)) continue;
+    if (!isPlausibleContactPath(link.url, home.finalUrl)) continue;
     tried.add(link.url);
 
     const page = await politeGet(link.url);
@@ -79,23 +100,33 @@ export async function crawlSite(rootUrl: string): Promise<Site | undefined> {
     const parsed = parseImprintHtml(page.html);
     mergeFields(fields, parsed);
 
+    // Auch hier den Redirect-Check: /kontakt → /kontaktlose-...-blog-post.
+    if (!isPlausibleContactPath(page.finalUrl, home.finalUrl)) continue;
     if (link.kind === "imprint" && !imprintUrl) imprintUrl = page.finalUrl;
     if (link.kind === "contact" && !contactPageUrl) contactPageUrl = page.finalUrl;
   }
 
-  // If neither imprint nor contact was found via discovered links, try common paths directly.
-  if (!imprintUrl || !contactPageUrl) {
+  // Common-Paths immer als Fallback — auch wenn Impressum gefunden wurde,
+  // aber noch keine Email/Phone extrahiert. Hilft besonders bei Shopify-Sites
+  // (/policies/...) oder wenn Homepage-Links auf Produktseiten verlinken.
+  const needMoreData = fields.emails.length === 0 && fields.phones.length === 0;
+  if (needMoreData || !imprintUrl) {
     for (const path of COMMON_PATHS) {
-      if (visits >= 2) break;
+      if (visits >= MAX_VISITS) break;
       const url = absolutiseUrl(path, home.finalUrl);
       if (!url || tried.has(url)) continue;
       tried.add(url);
       const page = await politeGet(url);
       if (!page.ok) continue;
       visits += 1;
+      // WordPress/SEO-Trick: /kontakt redirected oft auf einen Blog-Post mit
+      // "kontakt" im Slug. Wenn die finale URL nicht mehr nach Contact/
+      // Impressum aussieht, Daten parsen aber URL nicht zuweisen.
+      const redirectedAway = !isPlausibleContactPath(page.finalUrl, home.finalUrl);
       const parsed = parseImprintHtml(page.html);
       mergeFields(fields, parsed);
-      if (path.includes("impressum") || path.includes("imprint") || path.includes("legal")) {
+      if (redirectedAway) continue;
+      if (/(impressum|imprint|legal)/.test(path)) {
         imprintUrl ??= page.finalUrl;
       } else {
         contactPageUrl ??= page.finalUrl;
@@ -145,6 +176,31 @@ function weight(kind: LinkKind): number {
   if (kind === "imprint") return 0;
   if (kind === "contact") return 1;
   return 2;
+}
+
+/**
+ * Filtert URLs, die zu kontakt/contact-Begriffen passen, aber offensichtlich
+ * Produkt- oder Blog-Seiten sind. Erwartet eine flache URL mit max. 2
+ * Pfad-Segmenten, deren letztes Segment ein klares Contact/Impressum-Wort
+ * ist — kein Anhängsel wie "kontaktlose-temperaturmessung".
+ */
+function isPlausibleContactPath(url: string, baseUrl: string): boolean {
+  try {
+    const u = new URL(url);
+    const base = new URL(baseUrl);
+    if (u.host !== base.host) return false;
+    const segments = u.pathname.split("/").filter(Boolean);
+    if (segments.length === 0 || segments.length > MAX_PATH_SEGMENTS) return false;
+    if (SLUG_NEGATIVE.test(u.pathname)) return false;
+    const last = segments[segments.length - 1].toLowerCase();
+    // Strenger Match: nur exakte Begriffe oder mit kurzem Suffix wie "-en".
+    // Vermeidet "impressumspflicht-...", "kontaktlose-...", "contact-us-all-in-one-..."
+    return /^(impressum|imprint|kontakt|contact|contact-us|contact-information|legal-notice|legal_notice|legal|legalnotice|firmenprofil|unternehmen)(-(en|de))?$/.test(
+      last,
+    );
+  } catch {
+    return false;
+  }
 }
 
 function absolutiseUrl(href: string, baseUrl: string): string | null {
