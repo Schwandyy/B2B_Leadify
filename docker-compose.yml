@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-product2lead}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD muss in .env gesetzt sein}
+      POSTGRES_DB: ${POSTGRES_DB:-product2lead}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    # Postgres NICHT nach außen freigeben — Zugriff nur durch app im selben
+    # Compose-Netz. Für Backups: docker compose exec db pg_dump …
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-product2lead}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-product2lead}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-product2lead}?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET muss gesetzt sein}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL muss gesetzt sein}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      AI_MODEL_OPENAI: ${AI_MODEL_OPENAI:-gpt-4o-mini}
+      AI_MODEL_ANTHROPIC: ${AI_MODEL_ANTHROPIC:-claude-haiku-4-5-20251001}
+      RESEARCH_PROVIDER: ${RESEARCH_PROVIDER:-crawler}
+      CRON_SECRET: ${CRON_SECRET:?CRON_SECRET muss gesetzt sein}
+      REGISTER_ALLOWED_DOMAIN: ${REGISTER_ALLOWED_DOMAIN:-az-delivery.com}
+      UPLOAD_DIR: /app/uploads
+    ports:
+      # Nur an Host-IP binden, die euer Caddy erreichen kann.
+      # Wenn der Host-Caddy auf derselben VM läuft: 127.0.0.1:3100.
+      # Wenn der Caddy auf anderer VM ist: 0.0.0.0:3100 + Firewall einschränken.
+      - "${APP_BIND:-127.0.0.1}:3100:3100"
+    volumes:
+      - app_uploads:/app/uploads
+
+volumes:
+  db_data:
+  app_uploads:
